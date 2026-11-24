@@ -12,10 +12,10 @@ import {
 } from '../solver.mjs';
 
 describe('AGY solver helpers', () => {
-  it('locks model configuration to gemini-3.8-flash-low with low effort and 90s timeout', () => {
-    assert.equal(AGY_MODEL, 'gemini-3.8-flash-low');
-    assert.equal(AGY_EFFORT, 'low');
-    assert.equal(DEFAULT_SOLVE_TIMEOUT_MS, 90000);
+  it('locks model configuration to gemini-3.8-flash-high with high effort and 120s timeout', () => {
+    assert.equal(AGY_MODEL, 'gemini-3.8-flash-high');
+    assert.equal(AGY_EFFORT, 'high');
+    assert.equal(DEFAULT_SOLVE_TIMEOUT_MS, 120000);
   });
 
   it('validates and normalizes solve payloads while rejecting malformed or oversized requests', () => {
@@ -86,7 +86,7 @@ describe('AGY solver helpers', () => {
     );
   });
 
-  it('invokes agy CLI with sandbox, low effort, and isolated temp cwd, then cleans temp dir', async () => {
+  it('invokes agy CLI with sandbox, high effort, date context, failover, and cleans temp dir', async () => {
     let capturedBin = '';
     let capturedArgs = [];
     let capturedOpts = null;
@@ -119,22 +119,50 @@ describe('AGY solver helpers', () => {
 
     assert.equal(capturedBin, '/custom/bin/agy');
     assert.ok(capturedArgs.includes('--model'));
-    assert.equal(capturedArgs[capturedArgs.indexOf('--model') + 1], 'gemini-3.8-flash-low');
-    assert.equal(capturedArgs[capturedArgs.indexOf('--effort') + 1], 'low');
+    assert.equal(capturedArgs[capturedArgs.indexOf('--model') + 1], 'gemini-3.8-flash-high');
+    assert.equal(capturedArgs[capturedArgs.indexOf('--effort') + 1], 'high');
     assert.ok(capturedArgs.includes('--disable-slash-commands'));
     assert.ok(capturedArgs.includes('--sandbox'));
     assert.equal(capturedArgs[capturedArgs.indexOf('--output-format') + 1], 'json');
     assert.equal(capturedOpts.env.DBUS_SESSION_BUS_ADDRESS, undefined);
-    assert.equal(result.model, 'gemini-3.8-flash-low');
-    assert.equal(result.effort, 'low');
+    assert.equal(result.model, 'gemini-3.8-flash-high');
+    assert.equal(result.effort, 'high');
     assert.equal(result.solutions[0].answer, 'Sempoa');
 
     await assert.rejects(() => fs.stat(capturedOpts.cwd));
+
+    const attemptedBins = [];
+    const fallbackResult = await runAgySolver({
+      questions: [{ id: 'q1', type: 'quiz-choice', question: 'Alat hitung?', options: ['Sempoa', 'Astrolab'] }],
+      agyBins: ['/bin/agy-akun1', '/bin/agy-akun2'],
+      execFileFn: async (bin) => {
+        attemptedBins.push(bin);
+        if (bin === '/bin/agy-akun1') {
+          const err = new Error('authentication required');
+          err.code = 1;
+          err.stderr = 'Error: authentication required. Run agy to log in.';
+          throw err;
+        }
+        return {
+          stdout: JSON.stringify({
+            status: 'SUCCESS',
+            response: JSON.stringify({
+              solutions: [{ id: 'q1', choiceIndex: 0, answer: 'Sempoa', reason: 'Ok.' }],
+            }),
+          }),
+        };
+      },
+    });
+    assert.deepEqual(attemptedBins, ['/bin/agy-akun1', '/bin/agy-akun2']);
+    assert.equal(fallbackResult.solutions[0].answer, 'Sempoa');
+
     const prompt = buildSolvePrompt(
       [{ id: 'q1', type: 'quiz-choice', question: 'Q?', options: ['A', 'B'] }],
       'Context',
+      new Date('2026-11-24T00:00:00Z'),
     );
     assert.match(prompt, /Context/);
+    assert.match(prompt, /2026-11-24/);
     assert.match(prompt, /NEVER call run_command/i);
     assert.match(prompt, /ONE parallel batch of search_web/i);
   });

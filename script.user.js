@@ -336,7 +336,7 @@
     const solveAgyBtn = makeButton('Solve with AGY', async () => {
       solveAgyBtn.disabled = true;
       solveAgyBtn.textContent = 'Solving...';
-      statusEl.textContent = `${baseStatus} | Solving with AGY (gemini-3.8-flash-low)...`;
+      statusEl.textContent = `${baseStatus} | Solving with AGY (gemini-3.8-flash-high)...`;
       try {
         const res = await fetch(SOLVE_API_URL, {
           method: 'POST',
@@ -361,7 +361,7 @@
           if (sol?.id) aiSolutionsById.set(sol.id, sol);
         });
         renderCards(currentQuery);
-        statusEl.textContent = `${baseStatus} | Solved via AGY (${data.model || 'gemini-3.8-flash-low'})`;
+        statusEl.textContent = `${baseStatus} | Solved via AGY (${data.model || 'gemini-3.8-flash-high'})`;
       } catch (err) {
         statusEl.textContent = `${baseStatus} | AGY solve error: ${err?.message || 'Failed'}`;
       } finally {

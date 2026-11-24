@@ -241,8 +241,8 @@ describe('server endpoints', () => {
           });
         }
         return {
-          model: 'gemini-3.8-flash-low',
-          effort: 'low',
+          model: 'gemini-3.8-flash-high',
+          effort: 'high',
           durationMs: 120,
           solutions: questions.map((q) => ({
             id: q.id,
@@ -280,7 +280,7 @@ describe('server endpoints', () => {
     });
     assert.equal(okRes.status, 200);
     const okJson = await okRes.json();
-    assert.equal(okJson.model, 'gemini-3.8-flash-low');
+    assert.equal(okJson.model, 'gemini-3.8-flash-high');
     assert.equal(okJson.solutions[0].answer, '4');
 
     const firstPending = fetch(`${srv.baseUrl}/api/solve`, {
@@ -311,8 +311,8 @@ describe('server endpoints', () => {
       solveFn: async ({ questions }) => {
         await new Promise((resolve) => releases.push(resolve));
         return {
-          model: 'gemini-3.8-flash-low',
-          effort: 'low',
+          model: 'gemini-3.8-flash-high',
+          effort: 'high',
           durationMs: 10,
           solutions: [{ id: questions[0].id, choiceIndex: 0, answer: 'A', reason: 'Ok' }],
         };

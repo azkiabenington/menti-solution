@@ -208,8 +208,8 @@ describe('web UI client helpers', () => {
         capturedBody = JSON.parse(init.body);
         return new Response(
           JSON.stringify({
-            model: 'gemini-3.8-flash-low',
-            effort: 'low',
+            model: 'gemini-3.8-flash-high',
+            effort: 'high',
             solutions: [{ id: 'q1', choiceIndex: 0, answer: 'Sempoa', reason: 'Alat manik kuno.' }],
           }),
           { status: 200, headers: { 'content-type': 'application/json' } },
@@ -219,7 +219,7 @@ describe('web UI client helpers', () => {
 
     assert.equal(capturedBody.context, 'Sejarah');
     assert.deepEqual(capturedBody.questions[0].options, ['Sempoa', 'Astrolab']);
-    assert.equal(solved.model, 'gemini-3.8-flash-low');
+    assert.equal(solved.model, 'gemini-3.8-flash-high');
 
     const merged = mergeAiSolutions(questions, solved.solutions, solved.model);
     assert.equal(questions[0].aiSolution, undefined);
@@ -227,7 +227,7 @@ describe('web UI client helpers', () => {
       choiceIndex: 0,
       answer: 'Sempoa',
       reason: 'Alat manik kuno.',
-      model: 'gemini-3.8-flash-low',
+      model: 'gemini-3.8-flash-high',
     });
 
     const html = await fs.readFile(INDEX_HTML_PATH, 'utf8');
@@ -264,7 +264,7 @@ describe('web UI client helpers', () => {
       fetchFn: async (_url, init) => {
         seenSignal = init.signal;
         return new Response(
-          JSON.stringify({ model: 'gemini-3.8-flash-low', solutions: [] }),
+          JSON.stringify({ model: 'gemini-3.8-flash-high', solutions: [] }),
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
       },
