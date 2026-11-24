@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import {
   buildSlideDeckUrl,
   classifyFetchFailure,
+  computeNextThemePreference,
   fetchSlideDeck,
 } from '../index.js';
 
@@ -108,8 +109,10 @@ describe('web UI client helpers', () => {
   it('includes a classic script fallback in index.html that explains file:// module blocking', async () => {
     const html = await fs.readFile(INDEX_HTML_PATH, 'utf8');
     const matches = [...html.matchAll(/<script(?:\s+[^>]*)?>([\s\S]*?)<\/script>/gi)];
-    const inlineClassic = matches.find((m) => !/type=["']module["']/i.test(m[0]) && m[1].trim().length > 0);
-    assert.ok(inlineClassic, 'Expected an inline classic <script> fallback for file:// protocol');
+    const fileFallback = matches.find(
+      (m) => !/type=["']module["']/i.test(m[0]) && m[1].includes('file:'),
+    );
+    assert.ok(fileFallback, 'Expected an inline classic <script> fallback for file:// protocol');
 
     const solutionNode = { className: 'empty', textContent: '', replaceChildren(node) { this.textContent = node?.textContent ?? ''; } };
     const pNode = { className: '', textContent: '' };
@@ -120,8 +123,19 @@ describe('web UI client helpers', () => {
         createElement: () => pNode,
       },
     };
-    vm.runInNewContext(inlineClassic[1], ctx);
+    vm.runInNewContext(fileFallback[1], ctx);
     assert.equal(solutionNode.className, 'error');
     assert.match(solutionNode.textContent, /npm start|localhost|github\.io|userscript/i);
+  });
+
+  it('computes two-state color scheme toggle overrides and declares meta color-scheme in index.html', async () => {
+    assert.equal(computeNextThemePreference(null, false), 'dark');
+    assert.equal(computeNextThemePreference('dark', false), null);
+    assert.equal(computeNextThemePreference('dark', true), 'light');
+    assert.equal(computeNextThemePreference('light', true), null);
+
+    const html = await fs.readFile(INDEX_HTML_PATH, 'utf8');
+    assert.match(html, /<meta\s+name=["']color-scheme["']\s+content=["']light dark["']>/i);
+    assert.match(html, /id=["']themeToggleBtn["']/i);
   });
 });

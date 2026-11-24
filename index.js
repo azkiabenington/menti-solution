@@ -6,26 +6,22 @@ import {
   resolveApiBase,
 } from './config.js';
 
-/**
- * Build the backend API URL for fetching a Mentimeter slide deck.
- * @param {string} sessionId
- * @param {string} [apiBase]
- * @returns {string}
- */
+const COLOR_SCHEME_STORAGE_KEY = 'color-scheme';
+
 export function buildSlideDeckUrl(sessionId, apiBase = '') {
   const cleanBase = normalizeApiBase(apiBase);
   const path = `/api/slide-deck?sessionId=${encodeURIComponent(sessionId)}`;
   return cleanBase ? `${cleanBase}${path}` : path;
 }
 
-/**
- * Map failed HTTP responses to clear user-facing error codes and hints.
- * @param {number} status
- * @param {string} [contentType]
- * @param {string} [apiBase]
- * @param {{ message?: string }} [payload]
- * @returns {{ code: string, message: string }}
- */
+// Two-state color scheme toggle: returns null when reverting to OS preference.
+export function computeNextThemePreference(storedScheme, osPrefersDark) {
+  const renderedDark = storedScheme ? storedScheme === 'dark' : Boolean(osPrefersDark);
+  const target = renderedDark ? 'light' : 'dark';
+  const osScheme = osPrefersDark ? 'dark' : 'light';
+  return target === osScheme ? null : target;
+}
+
 export function classifyFetchFailure(status, contentType = '', apiBase = '', payload = null) {
   const isJson = String(contentType).toLowerCase().includes('application/json');
 
@@ -70,11 +66,6 @@ function createCodedError(code, message) {
   return error;
 }
 
-/**
- * Fetch and normalize a Mentimeter slide deck through the configured backend.
- * @param {string} sessionId
- * @param {{ apiBase?: string, fetchFn?: typeof fetch }} [options]
- */
 export async function fetchSlideDeck(
   sessionId,
   { apiBase = '', fetchFn = globalThis.fetch } = {},
@@ -154,6 +145,30 @@ async function copyTextToClipboard(text) {
   return legacyCopy(text);
 }
 
+function safeStorageGet(key) {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeStorageSet(key, value) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Ignore storage errors in restricted contexts.
+  }
+}
+
+function safeStorageRemove(key) {
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // Ignore storage errors in restricted contexts.
+  }
+}
+
 function initializeApp() {
   const form = document.getElementById('getAnswersForm');
   const mentiLinkInput = document.getElementById('mentiLink');
@@ -162,6 +177,8 @@ function initializeApp() {
   const toastEl = document.getElementById('statusToast');
   const noticeEl = document.getElementById('notice');
   const hideNoticeBtn = document.getElementById('hideNoticeBtn');
+  const themeToggleBtn = document.getElementById('themeToggleBtn');
+  const themeMeta = document.querySelector('meta[name="color-scheme"]');
   const apiBaseInput = document.getElementById('apiBaseInput');
   const activeApiSummary = document.getElementById('activeApiSummary');
   const apiBaseFeedback = document.getElementById('apiBaseFeedback');
@@ -170,9 +187,47 @@ function initializeApp() {
   const rawJsonInput = document.getElementById('rawJsonInput');
   const parseRawJsonBtn = document.getElementById('parseRawJsonBtn');
 
+  const colorSchemeQuery = window.matchMedia?.('(prefers-color-scheme: dark)');
+
+  function readStoredScheme() {
+    const stored = safeStorageGet(COLOR_SCHEME_STORAGE_KEY);
+    return stored === 'light' || stored === 'dark' ? stored : null;
+  }
+
+  function syncThemeUi() {
+    const stored = readStoredScheme();
+    const osDark = Boolean(colorSchemeQuery?.matches);
+    const activeDark = stored ? stored === 'dark' : osDark;
+    if (themeMeta) {
+      themeMeta.content = stored ?? 'light dark';
+    }
+    if (themeToggleBtn) {
+      themeToggleBtn.textContent = activeDark ? 'Switch to Light' : 'Switch to Dark';
+      themeToggleBtn.setAttribute('aria-pressed', String(stored !== null));
+    }
+  }
+
+  if (themeToggleBtn) {
+    themeToggleBtn.addEventListener('click', () => {
+      const next = computeNextThemePreference(readStoredScheme(), Boolean(colorSchemeQuery?.matches));
+      if (next) {
+        safeStorageSet(COLOR_SCHEME_STORAGE_KEY, next);
+      } else {
+        safeStorageRemove(COLOR_SCHEME_STORAGE_KEY);
+      }
+      syncThemeUi();
+    });
+  }
+
+  colorSchemeQuery?.addEventListener?.('change', syncThemeUi);
+  window.addEventListener('storage', (event) => {
+    if (event.key === COLOR_SCHEME_STORAGE_KEY) syncThemeUi();
+  });
+  syncThemeUi();
+
   let activeApiBase = resolveApiBase({
     search: window.location.search,
-    storage: window.localStorage,
+    storage: { getItem: safeStorageGet },
     defaultBase: DEFAULT_API_BASE,
   });
 
@@ -181,11 +236,9 @@ function initializeApp() {
 
   function showToast(rawMessage) {
     clearTimeout(toastTimer);
-    let message = rawMessage;
-    if (message === lastToastMessage) {
-      message += '\u00A0';
-    }
-    lastToastMessage = rawMessage;
+    // Toggling trailing NBSP forces VoiceOver to re-announce identical consecutive messages.
+    const message = rawMessage === lastToastMessage ? `${rawMessage}\u00A0` : rawMessage;
+    lastToastMessage = message;
     toastEl.textContent = message;
     toastEl.classList.add('show');
     toastTimer = setTimeout(() => {
@@ -279,20 +332,22 @@ function initializeApp() {
           });
         }
       } else if (item.type === 'quiz-choice') {
-        const list = document.createElement('ul');
-        list.className = 'choice-list';
+        if (item.options.length > 0) {
+          const list = document.createElement('ul');
+          list.className = 'choice-list';
 
-        item.options.forEach((option) => {
-          const li = document.createElement('li');
-          if (option.isCorrect) {
-            li.className = 'choice-item-correct';
-            li.textContent = `${option.title} [Correct]`;
-          } else {
-            li.textContent = option.title;
-          }
-          list.append(li);
-        });
-        card.append(list);
+          item.options.forEach((option) => {
+            const li = document.createElement('li');
+            if (option.isCorrect) {
+              li.className = 'choice-item-correct';
+              li.textContent = `${option.title} [Correct]`;
+            } else {
+              li.textContent = option.title;
+            }
+            list.append(li);
+          });
+          card.append(list);
+        }
 
         if (item.hasCorrectAnswer) {
           const correctText = item.options
@@ -303,6 +358,7 @@ function initializeApp() {
           copyBtn.type = 'button';
           copyBtn.className = 'copy-button';
           copyBtn.textContent = 'Copy Correct';
+          copyBtn.setAttribute('aria-label', `Copy correct answer ${correctText}`);
           copyBtn.addEventListener('click', async () => {
             const copied = await copyTextToClipboard(correctText);
             showToast(copied ? 'Copied' : 'Copy failed');
@@ -333,14 +389,17 @@ function initializeApp() {
     window.history.replaceState({}, '', nextUrl);
 
     submitBtn.disabled = true;
-    solutionEl.setAttribute('aria-busy', 'true');
     setStatusState('loading', `Fetching slide deck for session ${sessionId}...`);
 
     try {
       const parsed = await fetchSlideDeck(sessionId, { apiBase: activeApiBase });
       renderParsedDeck(parsed);
     } catch (error) {
-      setStatusState('error', error?.message || 'Failed to fetch quiz data.');
+      const msg =
+        error?.message === 'INVALID_PAYLOAD'
+          ? 'Unexpected response format from Mentimeter.'
+          : error?.message || 'Failed to fetch quiz data.';
+      setStatusState('error', msg);
     } finally {
       submitBtn.disabled = false;
       solutionEl.removeAttribute('aria-busy');
@@ -357,9 +416,9 @@ function initializeApp() {
       const normalized = normalizeApiBase(apiBaseInput.value);
       activeApiBase = normalized;
       if (normalized) {
-        window.localStorage.setItem(API_BASE_STORAGE_KEY, normalized);
+        safeStorageSet(API_BASE_STORAGE_KEY, normalized);
       } else {
-        window.localStorage.removeItem(API_BASE_STORAGE_KEY);
+        safeStorageRemove(API_BASE_STORAGE_KEY);
       }
       updateApiBaseDisplay();
       apiBaseFeedback.textContent = normalized
@@ -372,7 +431,7 @@ function initializeApp() {
 
   resetApiBaseBtn.addEventListener('click', () => {
     activeApiBase = '';
-    window.localStorage.removeItem(API_BASE_STORAGE_KEY);
+    safeStorageRemove(API_BASE_STORAGE_KEY);
     updateApiBaseDisplay();
     apiBaseFeedback.textContent = 'Reset to same-origin /api/slide-deck.';
   });
@@ -392,13 +451,13 @@ function initializeApp() {
     }
   });
 
-  if (window.localStorage.getItem('hideNotice') === 'true') {
+  if (safeStorageGet('hideNotice') === 'true') {
     noticeEl.hidden = true;
   }
 
   hideNoticeBtn.addEventListener('click', () => {
     noticeEl.hidden = true;
-    window.localStorage.setItem('hideNotice', 'true');
+    safeStorageSet('hideNotice', 'true');
   });
 
   updateApiBaseDisplay();

@@ -1,12 +1,7 @@
 export const DEFAULT_API_BASE = '';
 export const API_BASE_STORAGE_KEY = 'menti_api_base';
 
-/**
- * Validate and normalize an HTTP(S) API base URL without trailing slashes.
- * Empty values normalize to '' (same-origin mode).
- * @param {unknown} rawUrl
- * @returns {string}
- */
+// Restricts runtime API overrides to HTTP(S) origins without trailing slashes.
 export function normalizeApiBase(rawUrl) {
   if (rawUrl === null || rawUrl === undefined) return '';
   const trimmed = String(rawUrl).trim();
@@ -23,16 +18,10 @@ export function normalizeApiBase(rawUrl) {
     throw new Error('INVALID_API_BASE');
   }
 
-  const combined = `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, '');
-  return combined;
+  return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, '');
 }
 
-/**
- * Resolve API base URL using precedence: ?apiBase query > storage > defaultBase.
- * Invalid candidates are ignored safely.
- * @param {{ search?: string, storage?: { getItem?: (key: string) => string | null } | null, defaultBase?: string }} [options]
- * @returns {string}
- */
+// Resolves API base URL with precedence: ?apiBase query > storage > defaultBase.
 export function resolveApiBase({
   search = '',
   storage = null,
@@ -44,7 +33,7 @@ export function resolveApiBase({
       return normalizeApiBase(queryValue);
     }
   } catch {
-    // Ignore invalid query override and fall back.
+    // Ignore malformed query parameter and fall back to stored or default base.
   }
 
   try {
@@ -53,7 +42,7 @@ export function resolveApiBase({
       return normalizeApiBase(storedValue);
     }
   } catch {
-    // Ignore invalid stored value or restricted storage.
+    // Storage access can throw in restricted contexts; fall back to default.
   }
 
   try {

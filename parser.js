@@ -1,19 +1,11 @@
 const SESSION_ID_RE = /^[a-z0-9_-]{4,64}$/i;
 
-/**
- * Validate whether a string matches Mentimeter's session/participation ID format.
- * @param {unknown} sessionId
- * @returns {boolean}
- */
+// Validates Mentimeter participation keys and rejects path/query metacharacters.
 export function isValidSessionId(sessionId) {
   return typeof sessionId === 'string' && SESSION_ID_RE.test(sessionId.trim());
 }
 
-/**
- * Extract a validated Mentimeter session ID from a URL or bare session code.
- * @param {unknown} input
- * @returns {string | null}
- */
+// Accepts full menti.com URLs, bare host paths, or raw session IDs; rejects foreign hosts.
 export function extractMentiSessionId(input) {
   if (typeof input !== 'string') return null;
   const trimmed = input.trim();
@@ -79,11 +71,7 @@ function normalizeQuizQuestion(id, rawType, question, choices, textKey) {
   return null;
 }
 
-/**
- * Normalize Mentimeter slide_deck or legacy series payloads into question items.
- * @param {unknown} payload
- * @returns {{ deckTitle: string, totalSlides: number, questions: Array<object> }}
- */
+// Normalizes current slide_deck payloads and legacy series payloads into a single shape.
 export function parseSlideDeckPayload(payload) {
   if (!payload || typeof payload !== 'object') {
     throw new Error('INVALID_PAYLOAD');

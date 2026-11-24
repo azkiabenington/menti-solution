@@ -56,10 +56,7 @@ function sendJson(res, statusCode, payload, extraHeaders = {}) {
   res.end(body);
 }
 
-/**
- * Create a request handler serving static allowlisted assets and /api/slide-deck proxy.
- * @param {{ fetchFn?: typeof fetch, rootDir?: string, allowedOrigins?: string | string[], timeoutMs?: number }} [options]
- */
+// Serves only allowlisted static assets and proxies Mentimeter slide-deck requests.
 export function createServerHandler({
   fetchFn = globalThis.fetch,
   rootDir = __dirname,

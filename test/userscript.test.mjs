@@ -290,4 +290,50 @@ describe('script.user.js', () => {
     spaDom.history.pushState({}, '', '/');
     assert.equal(spaDom.body.querySelector('#menti-solutions-panel'), null);
   });
+
+  it('enforces 44px minimum button tap targets and injects focus/hover/active styles', async () => {
+    const source = await fs.readFile(SCRIPT_PATH, 'utf8');
+    assert.match(source, /:focus-visible/);
+    assert.match(source, /:hover/);
+    assert.match(source, /:active/);
+
+    const dom = createMockDom('https://www.menti.com/al742i1zxz7c');
+    vm.runInNewContext(source, {
+      window: dom.windowObj,
+      document: dom.document,
+      history: dom.history,
+      location: dom.location,
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            slide_deck: {
+              name: 'Quiz',
+              slides: [
+                {
+                  slide_public_key: 'q1',
+                  static_content: { type: 'quiz-open' },
+                  interactive_contents: [{ title: 'Q', choices: [{ title: 'Ans' }] }],
+                },
+              ],
+            },
+          };
+        },
+      }),
+      navigator: { clipboard: { writeText: async () => {} } },
+      URL,
+      setTimeout,
+      clearTimeout,
+      console,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const buttons = dom.body.querySelectorAll('button');
+    assert.ok(buttons.length >= 4);
+    for (const btn of buttons) {
+      assert.equal(btn.style.minHeight, '44px');
+      assert.equal(btn.style.minWidth, '44px');
+    }
+  });
 });

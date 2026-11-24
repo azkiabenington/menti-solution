@@ -15,6 +15,7 @@
 
 (() => {
   const PANEL_ID = 'menti-solutions-panel';
+  const STYLE_ID = 'menti-solutions-styles';
   const SESSION_ID_RE = /^[a-z0-9_-]{4,64}$/i;
 
   function isValidSessionId(sessionId) {
@@ -82,18 +83,64 @@
     };
   }
 
+  function createScopedStyles() {
+    const style = document.createElement('style');
+    style.id = STYLE_ID;
+    style.textContent = `
+      #${PANEL_ID} .ms-btn {
+        min-height: 44px;
+        min-width: 44px;
+        padding: 8px 12px;
+        border-radius: 6px;
+        border: 1px solid transparent;
+        background-color: #4f46e5;
+        color: #ffffff;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 600;
+        transition: background-color 0.15s ease, transform 0.1s ease;
+      }
+      #${PANEL_ID} .ms-btn:hover {
+        background-color: #6366f1;
+      }
+      #${PANEL_ID} .ms-btn:active {
+        transform: translateY(1px);
+      }
+      #${PANEL_ID} .ms-btn:focus-visible {
+        outline: 2px solid #a5b4fc;
+        outline-offset: 2px;
+      }
+      #${PANEL_ID} .ms-btn-secondary {
+        background-color: #242a38;
+        border-color: #6b7892;
+        color: #eef2f7;
+      }
+      #${PANEL_ID} .ms-btn-secondary:hover {
+        background-color: #2f374a;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #${PANEL_ID} .ms-btn {
+          transition: none;
+        }
+      }
+    `;
+    return style;
+  }
+
   function makeButton(label, onClick, isSecondary = false) {
     const btn = document.createElement('button');
     btn.type = 'button';
+    btn.className = isSecondary ? 'ms-btn ms-btn-secondary' : 'ms-btn';
     btn.textContent = label;
-    btn.style.padding = '6px 10px';
-    btn.style.minHeight = '32px';
+    btn.style.minHeight = '44px';
+    btn.style.minWidth = '44px';
+    btn.style.padding = '8px 12px';
     btn.style.borderRadius = '6px';
-    btn.style.border = isSecondary ? '1px solid #555555' : 'none';
-    btn.style.backgroundColor = isSecondary ? '#2c2c2c' : '#6200ea';
-    btn.style.color = '#ffffff';
+    btn.style.border = isSecondary ? '1px solid #6b7892' : '1px solid transparent';
+    btn.style.backgroundColor = isSecondary ? '#242a38' : '#4f46e5';
+    btn.style.color = isSecondary ? '#eef2f7' : '#ffffff';
     btn.style.cursor = 'pointer';
-    btn.style.fontSize = '12px';
+    btn.style.fontSize = '13px';
     btn.style.fontWeight = '600';
     btn.addEventListener('click', onClick);
     return btn;
@@ -116,32 +163,34 @@
     panel.style.top = '12px';
     panel.style.right = '12px';
     panel.style.zIndex = '2147483647';
-    panel.style.width = 'min(380px, calc(100vw - 24px))';
+    panel.style.width = 'min(400px, calc(100vw - 24px))';
     panel.style.maxHeight = '75vh';
     panel.style.display = 'flex';
     panel.style.flexDirection = 'column';
-    panel.style.backgroundColor = '#18181b';
-    panel.style.color = '#f4f4f5';
-    panel.style.border = '1px solid #6200ea';
+    panel.style.backgroundColor = '#1b1f2a';
+    panel.style.color = '#eef2f7';
+    panel.style.border = '1px solid #6b7892';
     panel.style.borderRadius = '10px';
-    panel.style.boxShadow = '0 8px 24px rgba(0, 0, 0, 0.55)';
+    panel.style.boxShadow = '0 8px 24px rgba(0, 0, 0, 0.45)';
     panel.style.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
     panel.style.fontSize = '14px';
 
     const header = document.createElement('div');
     header.style.display = 'flex';
+    header.style.flexWrap = 'wrap';
     header.style.alignItems = 'center';
     header.style.justifyContent = 'space-between';
     header.style.gap = '8px';
     header.style.padding = '10px 12px';
-    header.style.borderBottom = '1px solid #2e2e32';
+    header.style.borderBottom = '1px solid #3b4459';
 
     const title = document.createElement('strong');
     title.textContent = 'Menti Solutions';
-    title.style.color = '#bb86fc';
+    title.style.color = '#a5b4fc';
 
     const controls = document.createElement('div');
     controls.style.display = 'flex';
+    controls.style.flexWrap = 'wrap';
     controls.style.gap = '6px';
 
     const refreshBtn = makeButton('Refresh', () => loadSession(true), true);
@@ -160,7 +209,7 @@
     statusEl.style.margin = '0';
     statusEl.style.padding = '8px 12px 0';
     statusEl.style.fontSize = '12px';
-    statusEl.style.color = '#d4d4d8';
+    statusEl.style.color = '#b8c2d1';
 
     bodyEl = document.createElement('div');
     bodyEl.style.overflowY = 'auto';
@@ -169,7 +218,7 @@
     bodyEl.style.flexDirection = 'column';
     bodyEl.style.gap = '10px';
 
-    panel.append(header, statusEl, bodyEl);
+    panel.append(createScopedStyles(), header, statusEl, bodyEl);
     document.body.appendChild(panel);
     return panel;
   }
@@ -198,46 +247,57 @@
 
     parsed.questions.forEach((item, index) => {
       const card = document.createElement('div');
-      card.style.backgroundColor = '#27272a';
+      card.style.backgroundColor = '#242a38';
+      card.style.border = '1px solid #6b7892';
       card.style.borderRadius = '8px';
-      card.style.padding = '10px';
+      card.style.padding = '12px';
 
       const qTitle = document.createElement('div');
       qTitle.textContent = `${index + 1}. ${item.question || 'Untitled question'}`;
       qTitle.style.fontWeight = '600';
-      qTitle.style.marginBottom = '6px';
-      qTitle.style.color = '#e4e4e7';
+      qTitle.style.marginBottom = '8px';
+      qTitle.style.color = '#a5b4fc';
       card.appendChild(qTitle);
 
       if (item.type === 'quiz-open') {
-        item.answers.forEach((ans) => {
-          const row = document.createElement('div');
-          row.style.display = 'flex';
-          row.style.alignItems = 'center';
-          row.style.justifyContent = 'space-between';
-          row.style.gap = '8px';
-          row.style.marginTop = '4px';
+        if (item.answers.length === 0) {
+          const note = document.createElement('p');
+          note.textContent = 'No accepted short answer was returned for this slide.';
+          note.style.margin = '4px 0 0';
+          note.style.fontSize = '12px';
+          note.style.color = '#b8c2d1';
+          card.appendChild(note);
+        } else {
+          item.answers.forEach((ans) => {
+            const row = document.createElement('div');
+            row.style.display = 'flex';
+            row.style.alignItems = 'center';
+            row.style.justifyContent = 'space-between';
+            row.style.gap = '8px';
+            row.style.marginTop = '6px';
 
-          const ansSpan = document.createElement('span');
-          ansSpan.textContent = `Answer: ${ans}`;
-          ansSpan.style.color = '#86fcc1';
-          ansSpan.style.fontWeight = '700';
+            const ansSpan = document.createElement('span');
+            ansSpan.textContent = `Answer: ${ans}`;
+            ansSpan.style.color = '#6ee7b7';
+            ansSpan.style.fontWeight = '700';
 
-          const copyBtn = makeButton('Copy', async () => {
-            try {
-              await navigator.clipboard.writeText(ans);
-              copyBtn.textContent = 'Copied';
-              setTimeout(() => {
-                copyBtn.textContent = 'Copy';
-              }, 1500);
-            } catch {
-              copyBtn.textContent = 'Failed';
-            }
+            const copyBtn = makeButton('Copy', async () => {
+              try {
+                await navigator.clipboard.writeText(ans);
+                copyBtn.textContent = 'Copied';
+                setTimeout(() => {
+                  copyBtn.textContent = 'Copy';
+                }, 1500);
+              } catch {
+                copyBtn.textContent = 'Failed';
+              }
+            });
+            copyBtn.setAttribute('aria-label', `Copy answer ${ans}`);
+
+            row.append(ansSpan, copyBtn);
+            card.appendChild(row);
           });
-
-          row.append(ansSpan, copyBtn);
-          card.appendChild(row);
-        });
+        }
       } else {
         const list = document.createElement('ul');
         list.style.margin = '4px 0 0 18px';
@@ -246,7 +306,7 @@
         item.options.forEach((opt) => {
           const li = document.createElement('li');
           li.textContent = opt.isCorrect ? `${opt.title} [Correct]` : opt.title;
-          if (opt.isCorrect) li.style.color = '#86fcc1';
+          if (opt.isCorrect) li.style.color = '#6ee7b7';
           list.appendChild(li);
         });
         card.appendChild(list);
@@ -254,9 +314,9 @@
         if (!item.hasCorrectAnswer) {
           const note = document.createElement('p');
           note.textContent = 'Multiple-choice correct answers are not exposed in public API.';
-          note.style.margin = '6px 0 0';
+          note.style.margin = '8px 0 0';
           note.style.fontSize = '12px';
-          note.style.color = '#a1a1aa';
+          note.style.color = '#b8c2d1';
           card.appendChild(note);
         }
       }
