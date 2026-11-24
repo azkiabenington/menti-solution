@@ -238,6 +238,10 @@ summary:focus-visible {
     gap: 10px;
 }
 
+.tools-stack[hidden] {
+    display: none;
+}
+
 .details-panel {
     background-color: var(--bg-surface);
     border: 1px solid var(--border-subtle);

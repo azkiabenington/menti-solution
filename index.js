@@ -362,6 +362,8 @@ function initializeApp() {
   const noticeEl = document.getElementById('notice');
   const hideNoticeBtn = document.getElementById('hideNoticeBtn');
   const themeToggleBtn = document.getElementById('themeToggleBtn');
+  const toggleToolsBtn = document.getElementById('toggleToolsBtn');
+  const toolsStack = document.getElementById('toolsStack');
   const themeMeta = document.querySelector('meta[name="color-scheme"]');
   const apiBaseInput = document.getElementById('apiBaseInput');
   const activeApiSummary = document.getElementById('activeApiSummary');
@@ -409,6 +411,19 @@ function initializeApp() {
     if (event.key === COLOR_SCHEME_STORAGE_KEY) syncThemeUi();
   });
   syncThemeUi();
+
+  function setToolsVisible(visible) {
+    if (!toolsStack) return;
+    toolsStack.hidden = !visible;
+    if (toggleToolsBtn) {
+      toggleToolsBtn.setAttribute('aria-expanded', String(visible));
+      toggleToolsBtn.textContent = visible ? 'Hide Options' : 'Options';
+    }
+  }
+
+  if (toggleToolsBtn && toolsStack) {
+    toggleToolsBtn.addEventListener('click', () => setToolsVisible(toolsStack.hidden));
+  }
 
   const defaultApiBase = resolveDefaultApiBase(window.location.hostname);
   let activeApiBase = resolveApiBase({
@@ -900,6 +915,9 @@ function initializeApp() {
       const parsed = await fetchSlideDeck(sessionId, { apiBase: activeApiBase });
       renderParsedDeck(parsed);
     } catch (error) {
+      if (error?.code === 'STATIC_CORS_HINT' || error?.code === 'LNA_DENIED') {
+        setToolsVisible(true);
+      }
       const msg =
         error?.message === 'INVALID_PAYLOAD'
           ? 'Unexpected response format from Mentimeter.'

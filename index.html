@@ -23,6 +23,7 @@
     <header>
         <h1>Mentimeter Quiz Solution Provider</h1>
         <div class="header-actions">
+            <button type="button" id="toggleToolsBtn" class="secondary-btn" aria-expanded="false" aria-controls="toolsStack">Options</button>
             <button type="button" id="themeToggleBtn" class="secondary-btn">Theme: System</button>
             <a href="https://github.com/azkiabenington/menti-solution" target="_blank" rel="noopener noreferrer" aria-label="View source on GitHub">
                 <img src="./pics/github-mark.svg" alt="GitHub" width="30" height="30">
@@ -45,7 +46,7 @@
             <button id="getAnswers" type="submit">Get Answers</button>
         </form>
 
-        <section class="tools-stack" aria-label="Additional options">
+        <section id="toolsStack" class="tools-stack" aria-label="Additional options" hidden>
             <details id="apiSettingsPanel" class="details-panel">
                 <summary>Backend API Host (for GitHub Pages / remote host)</summary>
                 <div class="details-body">

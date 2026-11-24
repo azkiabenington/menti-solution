@@ -270,5 +270,9 @@ describe('web UI client helpers', () => {
       },
     });
     assert.equal(seenSignal, controller.signal);
+
+    const html = await fs.readFile(INDEX_HTML_PATH, 'utf8');
+    assert.match(html, /<section[^>]+id=["']toolsStack["'][^>]*\bhidden\b/i);
+    assert.match(html, /<button[^>]+id=["']toggleToolsBtn["'][^>]+aria-controls=["']toolsStack["']/i);
   });
 });
