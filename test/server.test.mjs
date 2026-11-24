@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_API_BASE, normalizeApiBase, resolveApiBase } from '../config.js';
+import { DEFAULT_API_BASE, normalizeApiBase, resolveApiBase, resolveDefaultApiBase } from '../config.js';
 import { createServerHandler } from '../server.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -62,6 +62,12 @@ describe('config helpers', () => {
       }),
       'https://default.example.com',
     );
+
+    assert.equal(
+      resolveDefaultApiBase('azkiabenington.github.io'),
+      'https://admin-adg.tail595888.ts.net',
+    );
+    assert.equal(resolveDefaultApiBase('127.0.0.1'), '');
   });
 });
 

@@ -1,6 +1,15 @@
 export const DEFAULT_API_BASE = '';
 export const API_BASE_STORAGE_KEY = 'menti_api_base';
 
+const HOST_API_DEFAULTS = {
+  'azkiabenington.github.io': 'https://admin-adg.tail595888.ts.net',
+};
+
+export function resolveDefaultApiBase(hostname = '') {
+  const key = String(hostname || '').trim().toLowerCase();
+  return HOST_API_DEFAULTS[key] ?? DEFAULT_API_BASE;
+}
+
 // Restricts runtime API overrides to HTTP(S) origins without trailing slashes.
 export function normalizeApiBase(rawUrl) {
   if (rawUrl === null || rawUrl === undefined) return '';

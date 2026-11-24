@@ -1,9 +1,9 @@
 import { extractMentiSessionId, parseSlideDeckPayload } from './parser.js';
 import {
   API_BASE_STORAGE_KEY,
-  DEFAULT_API_BASE,
   normalizeApiBase,
   resolveApiBase,
+  resolveDefaultApiBase,
 } from './config.js';
 
 const COLOR_SCHEME_STORAGE_KEY = 'color-scheme';
@@ -225,10 +225,11 @@ function initializeApp() {
   });
   syncThemeUi();
 
+  const defaultApiBase = resolveDefaultApiBase(window.location.hostname);
   let activeApiBase = resolveApiBase({
     search: window.location.search,
     storage: { getItem: safeStorageGet },
-    defaultBase: DEFAULT_API_BASE,
+    defaultBase: defaultApiBase,
   });
 
   let toastTimer = null;
@@ -430,10 +431,12 @@ function initializeApp() {
   });
 
   resetApiBaseBtn.addEventListener('click', () => {
-    activeApiBase = '';
+    activeApiBase = defaultApiBase;
     safeStorageRemove(API_BASE_STORAGE_KEY);
     updateApiBaseDisplay();
-    apiBaseFeedback.textContent = 'Reset to same-origin /api/slide-deck.';
+    apiBaseFeedback.textContent = activeApiBase
+      ? `Reset to default host: ${activeApiBase}.`
+      : 'Reset to same-origin /api/slide-deck.';
   });
 
   parseRawJsonBtn.addEventListener('click', () => {
