@@ -201,4 +201,107 @@ describe('server endpoints', () => {
     assert.equal(statusCode, 400);
     assert.equal(JSON.parse(body).error, 'BAD_REQUEST');
   });
+
+  it('resolves numeric voting code via participation-key before fetching slide-deck', async () => {
+    const requestedUrls = [];
+    const srv = await startTestServer({
+      fetchFn: async (url) => {
+        requestedUrls.push(url);
+        if (url.endsWith('/48139482/participation-key')) {
+          return new Response(JSON.stringify({ participation_key: 'al742i1zxz7c' }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ slide_deck: { name: 'Numeric Code Quiz', slides: [] } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      },
+    });
+    closers.push(srv.close);
+
+    const res = await fetch(`${srv.baseUrl}/api/slide-deck?sessionId=48139482`);
+    assert.equal(res.status, 200);
+    assert.deepEqual(requestedUrls, [
+      'https://api.mentimeter.com/audience/slide-deck/48139482/participation-key',
+      'https://api.mentimeter.com/audience/slide-deck/al742i1zxz7c',
+    ]);
+    assert.equal((await res.json()).slide_deck.name, 'Numeric Code Quiz');
+  });
+
+  it('handles POST /api/solve validation, concurrency limit, size cap, and AGY response', async () => {
+    let releaseSolve;
+    const srv = await startTestServer({
+      maxConcurrentSolves: 1,
+      solveFn: async ({ questions, context }) => {
+        if (context === 'HOLD') {
+          await new Promise((resolve) => {
+            releaseSolve = resolve;
+          });
+        }
+        return {
+          model: 'gemini-3.8-flash-low',
+          effort: 'low',
+          durationMs: 120,
+          solutions: questions.map((q) => ({
+            id: q.id,
+            choiceIndex: q.type === 'quiz-choice' ? 0 : null,
+            answer: q.type === 'quiz-choice' ? q.options[0] : 'Lovelace',
+            reason: 'Matched.',
+          })),
+        };
+      },
+    });
+    closers.push(srv.close);
+
+    const badRes = await fetch(`${srv.baseUrl}/api/solve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ questions: [] }),
+    });
+    assert.equal(badRes.status, 400);
+    assert.equal((await badRes.json()).error, 'INVALID_SOLVE_REQUEST');
+
+    const tooLargeRes = await fetch(`${srv.baseUrl}/api/solve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ questions: [{ id: 'q1', type: 'quiz-open', question: 'x'.repeat(70000) }] }),
+    });
+    assert.equal(tooLargeRes.status, 413);
+    assert.equal((await tooLargeRes.json()).error, 'PAYLOAD_TOO_LARGE');
+
+    const okRes = await fetch(`${srv.baseUrl}/api/solve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        questions: [{ id: 'q1', type: 'quiz-choice', question: '2+2?', options: ['4', '5'] }],
+      }),
+    });
+    assert.equal(okRes.status, 200);
+    const okJson = await okRes.json();
+    assert.equal(okJson.model, 'gemini-3.8-flash-low');
+    assert.equal(okJson.solutions[0].answer, '4');
+
+    const firstPending = fetch(`${srv.baseUrl}/api/solve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        context: 'HOLD',
+        questions: [{ id: 'q1', type: 'quiz-choice', question: 'Hold?', options: ['A', 'B'] }],
+      }),
+    });
+    await new Promise((r) => setTimeout(r, 25));
+    const busyRes = await fetch(`${srv.baseUrl}/api/solve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        questions: [{ id: 'q1', type: 'quiz-choice', question: 'Busy?', options: ['A', 'B'] }],
+      }),
+    });
+    assert.equal(busyRes.status, 429);
+    assert.equal((await busyRes.json()).error, 'SOLVER_BUSY');
+    releaseSolve();
+    assert.equal((await firstPending).status, 200);
+  });
 });

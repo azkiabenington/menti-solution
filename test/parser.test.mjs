@@ -32,6 +32,8 @@ describe('extractMentiSessionId', () => {
     assert.equal(extractMentiSessionId('menti.com/al742i1zxz7c/'), 'al742i1zxz7c');
     assert.equal(extractMentiSessionId('www.menti.com/al742i1zxz7c'), 'al742i1zxz7c');
     assert.equal(extractMentiSessionId('al742i1zxz7c'), 'al742i1zxz7c');
+    assert.equal(extractMentiSessionId('48139482'), '48139482');
+    assert.equal(extractMentiSessionId('4813 9482'), '48139482');
   });
 
   it('rejects non-menti domains, empty strings, and invalid path segments', () => {

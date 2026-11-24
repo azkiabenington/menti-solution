@@ -15,6 +15,11 @@ export function extractMentiSessionId(input) {
     return trimmed;
   }
 
+  const compactNumeric = trimmed.replace(/\s+/g, '');
+  if (/^\d{4,12}$/.test(compactNumeric) && isValidSessionId(compactNumeric)) {
+    return compactNumeric;
+  }
+
   const candidate = /^(?:www\.)?menti\.com(?:\/|$)/i.test(trimmed)
     ? `https://${trimmed}`
     : trimmed;

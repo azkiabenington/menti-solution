@@ -16,6 +16,7 @@
 (() => {
   const PANEL_ID = 'menti-solutions-panel';
   const STYLE_ID = 'menti-solutions-styles';
+  const SOLVE_API_URL = 'https://admin-adg.tail595888.ts.net/api/solve';
   const SESSION_ID_RE = /^[a-z0-9_-]{4,64}$/i;
 
   function isValidSessionId(sessionId) {
@@ -85,9 +86,11 @@
       const question = nonEmptyText(primary?.title) || nonEmptyText(slide?.title);
       const countdown = normalizeCountdown(primary?.countdown ?? slide?.countdown ?? null);
       const choices = contents.flatMap((item) => (Array.isArray(item?.choices) ? item.choices : []));
+      const id = nonEmptyText(slide?.slide_public_key) || `slide-${i + 1}`;
 
       if (slideType === 'quiz-open') {
         questions.push({
+          id,
           type: 'quiz-open',
           question,
           countdown,
@@ -101,6 +104,7 @@
           }))
           .filter((o) => o.title.length > 0);
         questions.push({
+          id,
           type: 'quiz-choice',
           question,
           countdown,
@@ -309,8 +313,8 @@
   function renderResults(parsed) {
     ensurePanel();
     const roomPart = parsed.participationCode ? ` | Room ${parsed.participationCode}` : '';
-    statusEl.textContent =
-      `${parsed.deckTitle || 'Mentimeter Quiz'} (${parsed.questions.length} question(s)${roomPart})`;
+    const baseStatus = `${parsed.deckTitle || 'Mentimeter Quiz'} (${parsed.questions.length} question(s)${roomPart})`;
+    statusEl.textContent = baseStatus;
     bodyEl.replaceChildren();
 
     if (parsed.questions.length === 0) {
@@ -321,9 +325,54 @@
       return;
     }
 
+    const aiSolutionsById = new Map();
+    let currentQuery = '';
+
+    const topActions = document.createElement('div');
+    topActions.style.display = 'flex';
+    topActions.style.flexWrap = 'wrap';
+    topActions.style.gap = '8px';
+
+    const solveAgyBtn = makeButton('Solve with AGY', async () => {
+      solveAgyBtn.disabled = true;
+      solveAgyBtn.textContent = 'Solving...';
+      statusEl.textContent = `${baseStatus} | Solving with AGY (gemini-3.8-flash-low)...`;
+      try {
+        const res = await fetch(SOLVE_API_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            accept: 'application/json',
+          },
+          body: JSON.stringify({
+            questions: parsed.questions.map((q) => ({
+              id: q.id,
+              type: q.type,
+              question: q.question,
+              options: Array.isArray(q.options) ? q.options.map((o) => o.title) : [],
+            })),
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || !Array.isArray(data?.solutions)) {
+          throw new Error(data?.message || `HTTP ${res.status}`);
+        }
+        data.solutions.forEach((sol) => {
+          if (sol?.id) aiSolutionsById.set(sol.id, sol);
+        });
+        renderCards(currentQuery);
+        statusEl.textContent = `${baseStatus} | Solved via AGY (${data.model || 'gemini-3.8-flash-low'})`;
+      } catch (err) {
+        statusEl.textContent = `${baseStatus} | AGY solve error: ${err?.message || 'Failed'}`;
+      } finally {
+        solveAgyBtn.disabled = false;
+        solveAgyBtn.textContent = 'Solve with AGY';
+      }
+    }, false);
+
     const copyAllBtn = makeCopyButton('Copy All Questions', () => formatDeckPrompt(parsed), true);
-    copyAllBtn.style.alignSelf = 'flex-start';
-    bodyEl.appendChild(copyAllBtn);
+    topActions.append(solveAgyBtn, copyAllBtn);
+    bodyEl.appendChild(topActions);
 
     let searchInput = null;
     if (parsed.questions.length > 1) {
@@ -342,7 +391,8 @@
       searchInput.style.fontSize = '13px';
       searchInput.style.boxSizing = 'border-box';
       searchInput.addEventListener('input', () => {
-        renderCards(searchInput.value);
+        currentQuery = searchInput.value;
+        renderCards(currentQuery);
       });
       searchBox.appendChild(searchInput);
       bodyEl.appendChild(searchBox);
@@ -370,6 +420,7 @@
 
       filtered.forEach((item) => {
         const index = parsed.questions.indexOf(item);
+        const aiSol = aiSolutionsById.get(item.id);
         const card = document.createElement('div');
         card.style.backgroundColor = '#242a38';
         card.style.border = '1px solid #6b7892';
@@ -422,15 +473,46 @@
           item.options.forEach((opt, optIndex) => {
             const li = document.createElement('li');
             const label = formatOptionLabel(optIndex);
-            li.textContent = opt.isCorrect
-              ? `${label}. ${opt.title} [Correct]`
-              : `${label}. ${opt.title}`;
-            if (opt.isCorrect) li.style.color = '#6ee7b7';
+            const isAiPick = aiSol?.choiceIndex === optIndex;
+            if (opt.isCorrect) {
+              li.textContent = `${label}. ${opt.title} [Correct]`;
+              li.style.color = '#6ee7b7';
+              li.style.fontWeight = '700';
+            } else if (isAiPick) {
+              li.textContent = `${label}. ${opt.title} [AI Pick]`;
+              li.style.color = '#a5b4fc';
+              li.style.fontWeight = '700';
+            } else {
+              li.textContent = `${label}. ${opt.title}`;
+            }
             list.appendChild(li);
           });
           card.appendChild(list);
 
-          if (!item.hasCorrectAnswer) {
+          if (aiSol) {
+            const aiBox = document.createElement('div');
+            aiBox.style.marginTop = '8px';
+            aiBox.style.padding = '8px';
+            aiBox.style.borderRadius = '6px';
+            aiBox.style.backgroundColor = '#1b1f2a';
+            aiBox.style.borderLeft = '3px solid #6366f1';
+
+            const aiAns = document.createElement('div');
+            aiAns.textContent = `AGY Answer: ${aiSol.answer}`;
+            aiAns.style.color = '#6ee7b7';
+            aiAns.style.fontWeight = '700';
+            aiBox.appendChild(aiAns);
+
+            if (aiSol.reason) {
+              const aiReason = document.createElement('div');
+              aiReason.textContent = aiSol.reason;
+              aiReason.style.color = '#b8c2d1';
+              aiReason.style.fontSize = '12px';
+              aiReason.style.marginTop = '4px';
+              aiBox.appendChild(aiReason);
+            }
+            card.appendChild(aiBox);
+          } else if (!item.hasCorrectAnswer) {
             const note = document.createElement('p');
             note.textContent = 'Multiple-choice correct answers are not exposed in public API.';
             note.style.margin = '8px 0 0';

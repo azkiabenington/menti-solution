@@ -324,7 +324,36 @@ summary:focus-visible {
 .deck-actions {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 8px;
+}
+
+progress.loading-spinner:indeterminate::-webkit-progress-bar,
+progress.loading-spinner:indeterminate::-webkit-progress-value,
+progress.loading-spinner:indeterminate::-moz-progress-bar {
+    display: none;
+    background: none;
+}
+
+progress.loading-spinner:indeterminate {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    appearance: none;
+    border: 3px solid var(--border-subtle);
+    border-top-color: var(--accent);
+    background: transparent;
+    animation: spinner-rotate 0.8s linear infinite;
+}
+
+progress.loading-spinner[hidden] {
+    display: none;
+}
+
+@keyframes spinner-rotate {
+    to {
+        transform: rotate(1turn);
+    }
 }
 
 .question-search {
@@ -438,6 +467,40 @@ summary:focus-visible {
     font-weight: 700;
 }
 
+.choice-item-ai {
+    color: var(--accent-text);
+    font-weight: 700;
+}
+
+.ai-answer-box {
+    margin-top: 12px;
+    padding: 10px 12px;
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-left: 4px solid var(--accent);
+    border-radius: 6px;
+}
+
+.ai-answer-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.ai-answer-title {
+    font-weight: 700;
+    color: var(--success-text);
+    word-break: break-word;
+}
+
+.ai-answer-reason {
+    margin: 6px 0 0 0;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
 .question-note {
     margin: 10px 0 0 0;
     font-size: 0.9rem;
@@ -527,5 +590,17 @@ footer p {
     button,
     .toast {
         transition: none;
+    }
+
+    progress.loading-spinner:indeterminate {
+        animation: none;
+    }
+}
+
+@media (forced-colors: active) {
+    progress.loading-spinner:indeterminate {
+        forced-color-adjust: none;
+        border-color: GrayText;
+        border-top-color: CanvasText;
     }
 }

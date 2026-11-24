@@ -3,8 +3,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isValidSessionId } from './parser.js';
+import { runAgySolver, validateSolvePayload } from './solver.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const MAX_SOLVE_BODY_BYTES = 64 * 1024;
 
 const STATIC_ALLOWLIST = new Map([
   ['/', { file: 'index.html', type: 'text/html; charset=utf-8' }],
@@ -32,7 +34,7 @@ function parseAllowedOrigins(rawOrigins) {
 
 function buildCorsHeaders(reqOrigin, allowedSet) {
   const headers = {
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
   };
 
@@ -56,14 +58,80 @@ function sendJson(res, statusCode, payload, extraHeaders = {}) {
   res.end(body);
 }
 
-// Serves only allowlisted static assets and proxies Mentimeter slide-deck requests.
+function createHttpError(code, message, statusCode = 400) {
+  const err = new Error(message);
+  err.code = code;
+  err.statusCode = statusCode;
+  return err;
+}
+
+async function readJsonBody(req, maxBytes = MAX_SOLVE_BODY_BYTES) {
+  const declaredLen = Number.parseInt(req.headers?.['content-length'] || '', 10);
+  if (Number.isFinite(declaredLen) && declaredLen > maxBytes) {
+    throw createHttpError('PAYLOAD_TOO_LARGE', `Request body exceeds ${maxBytes} bytes.`, 413);
+  }
+
+  let totalBytes = 0;
+  const chunks = [];
+  for await (const chunk of req) {
+    const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+    totalBytes += buf.length;
+    if (totalBytes > maxBytes) {
+      throw createHttpError('PAYLOAD_TOO_LARGE', `Request body exceeds ${maxBytes} bytes.`, 413);
+    }
+    chunks.push(buf);
+  }
+
+  const rawText = Buffer.concat(chunks).toString('utf8').trim();
+  if (!rawText) {
+    throw createHttpError('INVALID_SOLVE_REQUEST', 'Request body cannot be empty.', 400);
+  }
+
+  try {
+    return JSON.parse(rawText);
+  } catch {
+    throw createHttpError('INVALID_SOLVE_REQUEST', 'Request body must be valid JSON.', 400);
+  }
+}
+
+async function resolveParticipationKey(sessionId, fetchFn, timeoutMs) {
+  if (!/^\d{6,10}$/.test(sessionId)) {
+    return sessionId;
+  }
+
+  const lookupUrl = `https://api.mentimeter.com/audience/slide-deck/${encodeURIComponent(sessionId)}/participation-key`;
+  const keyRes = await fetchFn(lookupUrl, {
+    headers: { accept: 'application/json' },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+
+  if (keyRes.status === 404) {
+    throw createHttpError('QUIZ_NOT_FOUND', 'Mentimeter quiz was not found or is inactive.', 404);
+  }
+  if (!keyRes.ok) {
+    throw createHttpError('UPSTREAM_ERROR', `Mentimeter API returned HTTP ${keyRes.status}.`, 502);
+  }
+
+  const keyPayload = await keyRes.json().catch(() => null);
+  const resolved = typeof keyPayload?.participation_key === 'string' ? keyPayload.participation_key.trim() : '';
+  if (!isValidSessionId(resolved)) {
+    throw createHttpError('QUIZ_NOT_FOUND', 'Mentimeter quiz was not found or is inactive.', 404);
+  }
+
+  return resolved;
+}
+
+// Serves only allowlisted static assets and proxies Mentimeter slide-deck & AGY solver requests.
 export function createServerHandler({
   fetchFn = globalThis.fetch,
   rootDir = __dirname,
   allowedOrigins = '*',
   timeoutMs = 10000,
+  solveFn = (payload) => runAgySolver(payload),
+  maxConcurrentSolves = 3,
 } = {}) {
   const allowedOriginPolicy = parseAllowedOrigins(allowedOrigins);
+  let activeSolves = 0;
 
   return async function handleRequest(req, res) {
     const method = (req.method || 'GET').toUpperCase();
@@ -109,9 +177,10 @@ export function createServerHandler({
         }
 
         const sessionId = rawSessionId.trim();
-        const upstreamUrl = `https://api.mentimeter.com/audience/slide-deck/${encodeURIComponent(sessionId)}`;
 
         try {
+          const resolvedSessionId = await resolveParticipationKey(sessionId, fetchFn, timeoutMs);
+          const upstreamUrl = `https://api.mentimeter.com/audience/slide-deck/${encodeURIComponent(resolvedSessionId)}`;
           const upstreamRes = await fetchFn(upstreamUrl, {
             headers: { accept: 'application/json' },
             signal: AbortSignal.timeout(timeoutMs),
@@ -166,6 +235,10 @@ export function createServerHandler({
 
           sendJson(res, 200, parsedBody, corsHeaders);
         } catch (error) {
+          if (error?.statusCode && error?.code) {
+            sendJson(res, error.statusCode, { error: error.code, message: error.message }, corsHeaders);
+            return;
+          }
           if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
             sendJson(
               res,
@@ -182,6 +255,64 @@ export function createServerHandler({
             { error: 'UPSTREAM_ERROR', message: 'Failed to contact Mentimeter API.' },
             corsHeaders,
           );
+        }
+        return;
+      }
+
+      if (pathname === '/api/solve') {
+        if (method === 'OPTIONS') {
+          res.writeHead(204, corsHeaders);
+          res.end();
+          return;
+        }
+
+        if (method !== 'POST') {
+          sendJson(res, 405, { error: 'METHOD_NOT_ALLOWED', message: 'Use POST.' }, corsHeaders);
+          return;
+        }
+
+        let validated;
+        try {
+          const body = await readJsonBody(req);
+          validated = validateSolvePayload(body);
+        } catch (error) {
+          if (error?.code === 'PAYLOAD_TOO_LARGE') {
+            sendJson(res, 413, { error: 'PAYLOAD_TOO_LARGE', message: error.message }, corsHeaders);
+            return;
+          }
+          sendJson(
+            res,
+            400,
+            { error: error?.code || 'INVALID_SOLVE_REQUEST', message: error?.message || 'Invalid solve request.' },
+            corsHeaders,
+          );
+          return;
+        }
+
+        if (activeSolves >= maxConcurrentSolves) {
+          sendJson(
+            res,
+            429,
+            { error: 'SOLVER_BUSY', message: 'AGY solver is busy right now. Please try again in a few seconds.' },
+            { ...corsHeaders, 'Retry-After': '5' },
+          );
+          return;
+        }
+
+        activeSolves += 1;
+        try {
+          const solved = await solveFn(validated);
+          sendJson(res, 200, solved, corsHeaders);
+        } catch (error) {
+          if (error?.code === 'SOLVER_TIMEOUT') {
+            sendJson(res, 504, { error: 'SOLVER_TIMEOUT', message: error.message }, corsHeaders);
+          } else if (error?.code === 'SOLVER_UNAVAILABLE') {
+            sendJson(res, 503, { error: 'SOLVER_UNAVAILABLE', message: error.message }, corsHeaders);
+          } else {
+            sendJson(res, 502, { error: error?.code || 'SOLVER_FAILED', message: error?.message || 'AGY solver failed.' }, corsHeaders);
+          }
+        } finally {
+          activeSolves -= 1;
         }
         return;
       }

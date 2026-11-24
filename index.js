@@ -21,6 +21,11 @@ export function buildSlideDeckUrl(sessionId, apiBase = '') {
   return cleanBase ? `${cleanBase}${path}` : path;
 }
 
+export function buildSolveUrl(apiBase = '') {
+  const cleanBase = normalizeApiBase(apiBase);
+  return cleanBase ? `${cleanBase}/api/solve` : '/api/solve';
+}
+
 export function filterQuestions(questions, query = '') {
   if (!Array.isArray(questions)) return [];
   const q = String(query || '').trim().toLowerCase();
@@ -180,6 +185,97 @@ export async function fetchSlideDeck(
   return parseSlideDeckPayload(parsedJson);
 }
 
+export function mergeAiSolutions(questions, solutions = [], model = 'gemini-3.8-flash-low') {
+  if (!Array.isArray(questions)) return [];
+  const byId = new Map(
+    (Array.isArray(solutions) ? solutions : []).map((sol) => [sol?.id, sol]),
+  );
+
+  return questions.map((item) => {
+    const match = byId.get(item?.id);
+    if (!match) {
+      return { ...item };
+    }
+    return {
+      ...item,
+      aiSolution: {
+        choiceIndex: typeof match.choiceIndex === 'number' ? match.choiceIndex : null,
+        answer: String(match.answer || ''),
+        reason: String(match.reason || ''),
+        model,
+      },
+    };
+  });
+}
+
+export async function requestAiSolve(
+  questions,
+  {
+    apiBase = '',
+    context = '',
+    fetchFn = globalThis.fetch,
+    permissions = globalThis.navigator?.permissions,
+  } = {},
+) {
+  const cleanQuestions = (Array.isArray(questions) ? questions : []).map((item) => ({
+    id: item.id,
+    type: item.type,
+    question: item.question,
+    options: Array.isArray(item.options)
+      ? item.options.map((opt) => (typeof opt === 'string' ? opt : opt?.title || '')).filter(Boolean)
+      : [],
+  }));
+
+  if (cleanQuestions.length === 0) {
+    throw createCodedError('INVALID_SOLVE_REQUEST', 'No quiz questions available to solve.');
+  }
+
+  const url = buildSolveUrl(apiBase);
+  let response;
+  try {
+    response = await fetchFn(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify({
+        questions: cleanQuestions,
+        context: String(context || '').trim(),
+      }),
+    });
+  } catch {
+    if (!apiBase) {
+      throw createCodedError(
+        'STATIC_CORS_HINT',
+        'Static hosting has no /api/solve backend. Open admin-adg directly or configure Backend API Host.',
+      );
+    }
+    const lnaState = await queryLnaPermissionSafe(permissions);
+    if (lnaState === 'denied') {
+      throw createCodedError(
+        'LNA_DENIED',
+        `Browser blocked Local network access to ${apiBase}. Allow "Local network" in site settings or open ${apiBase} directly.`,
+      );
+    }
+    throw createCodedError('SOLVER_FAILED', 'Could not reach AGY solver backend.');
+  }
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw createCodedError(
+      payload?.error || 'SOLVER_FAILED',
+      payload?.message || `AGY solver failed (HTTP ${response.status}).`,
+    );
+  }
+
+  if (!payload || !Array.isArray(payload.solutions)) {
+    throw createCodedError('SOLVER_FAILED', 'AGY solver returned an invalid response.');
+  }
+
+  return payload;
+}
+
 function legacyCopy(text) {
   const previousFocus = document.activeElement;
   const field = document.createElement('textarea');
@@ -247,6 +343,7 @@ function initializeApp() {
   const apiBaseFeedback = document.getElementById('apiBaseFeedback');
   const saveApiBaseBtn = document.getElementById('saveApiBaseBtn');
   const resetApiBaseBtn = document.getElementById('resetApiBaseBtn');
+  const aiContextInput = document.getElementById('aiContextInput');
   const rawJsonInput = document.getElementById('rawJsonInput');
   const parseRawJsonBtn = document.getElementById('parseRawJsonBtn');
 
@@ -333,6 +430,10 @@ function initializeApp() {
   }
 
   function renderParsedDeck(parsed) {
+    let currentDeck = parsed;
+    let activeQuery = '';
+    let solving = false;
+
     solutionEl.className = 'success';
     solutionEl.removeAttribute('aria-busy');
     solutionEl.replaceChildren();
@@ -341,20 +442,73 @@ function initializeApp() {
     summary.className = 'deck-summary';
     const summaryText = document.createElement('div');
     const titleEl = document.createElement('h2');
-    titleEl.textContent = parsed.deckTitle || 'Mentimeter Quiz';
+    titleEl.textContent = currentDeck.deckTitle || 'Mentimeter Quiz';
     const countsEl = document.createElement('p');
-    const openCount = parsed.questions.filter((q) => q.type === 'quiz-open').length;
-    const choiceCount = parsed.questions.filter((q) => q.type === 'quiz-choice').length;
-    const roomPart = parsed.participationCode ? ` | Room: ${parsed.participationCode}` : '';
+    const openCount = currentDeck.questions.filter((q) => q.type === 'quiz-open').length;
+    const choiceCount = currentDeck.questions.filter((q) => q.type === 'quiz-choice').length;
+    const roomPart = currentDeck.participationCode ? ` | Room: ${currentDeck.participationCode}` : '';
     countsEl.textContent =
-      `Slides: ${parsed.totalSlides} total${roomPart} | Questions: ${parsed.questions.length} ` +
+      `Slides: ${currentDeck.totalSlides} total${roomPart} | Questions: ${currentDeck.questions.length} ` +
       `(${openCount} short-answer, ${choiceCount} multiple-choice)`;
     summaryText.append(titleEl, countsEl);
     summary.append(summaryText);
 
-    if (parsed.questions.length > 0) {
+    let aiProgress = null;
+    let solveAiBtn = null;
+
+    async function runSolveFlow(targetQuestions, triggerBtn) {
+      if (solving || targetQuestions.length === 0) return;
+      solving = true;
+      if (solveAiBtn) solveAiBtn.disabled = true;
+      if (triggerBtn && triggerBtn !== solveAiBtn) triggerBtn.disabled = true;
+      if (aiProgress) aiProgress.hidden = false;
+
+      const originalText = triggerBtn?.textContent || '';
+      if (triggerBtn) triggerBtn.textContent = 'Solving...';
+
+      try {
+        const result = await requestAiSolve(targetQuestions, {
+          apiBase: activeApiBase,
+          context: aiContextInput?.value || '',
+        });
+        currentDeck = {
+          ...currentDeck,
+          questions: mergeAiSolutions(currentDeck.questions, result.solutions, result.model),
+        };
+        renderCards(activeQuery);
+        showToast(`AGY solved ${result.solutions.length} question(s) (${result.model})`);
+      } catch (error) {
+        showToast(error?.message || 'AGY solver failed');
+      } finally {
+        solving = false;
+        if (aiProgress) aiProgress.hidden = true;
+        if (solveAiBtn) {
+          solveAiBtn.disabled = false;
+          if (triggerBtn === solveAiBtn) solveAiBtn.textContent = originalText || 'Solve with AGY';
+        }
+        if (triggerBtn && triggerBtn !== solveAiBtn) {
+          triggerBtn.disabled = false;
+          triggerBtn.textContent = originalText || 'Ask AGY';
+        }
+      }
+    }
+
+    if (currentDeck.questions.length > 0) {
       const deckActions = document.createElement('div');
       deckActions.className = 'deck-actions';
+
+      aiProgress = document.createElement('progress');
+      aiProgress.id = 'aiProgress';
+      aiProgress.className = 'loading-spinner';
+      aiProgress.setAttribute('aria-label', 'Solving quiz with AGY');
+      aiProgress.hidden = true;
+
+      solveAiBtn = document.createElement('button');
+      solveAiBtn.type = 'button';
+      solveAiBtn.id = 'solveAiBtn';
+      solveAiBtn.className = 'copy-button ai-solve-btn';
+      solveAiBtn.textContent = 'Solve with AGY';
+      solveAiBtn.addEventListener('click', () => runSolveFlow(currentDeck.questions, solveAiBtn));
 
       const copyAllBtn = document.createElement('button');
       copyAllBtn.type = 'button';
@@ -362,11 +516,11 @@ function initializeApp() {
       copyAllBtn.className = 'copy-button secondary-btn';
       copyAllBtn.textContent = 'Copy All Questions';
       copyAllBtn.addEventListener('click', async () => {
-        const copied = await copyTextToClipboard(formatDeckPrompt(parsed));
+        const copied = await copyTextToClipboard(formatDeckPrompt(currentDeck));
         showToast(copied ? 'Copied all questions' : 'Copy failed');
       });
 
-      const slug = buildExportSlug(parsed.deckTitle);
+      const slug = buildExportSlug(currentDeck.deckTitle);
 
       const exportMdBtn = document.createElement('button');
       exportMdBtn.type = 'button';
@@ -374,7 +528,7 @@ function initializeApp() {
       exportMdBtn.className = 'copy-button secondary-btn';
       exportMdBtn.textContent = 'Export .md';
       exportMdBtn.addEventListener('click', () => {
-        downloadTextFile(`${slug}.md`, formatDeckMarkdown(parsed), 'text/markdown;charset=utf-8');
+        downloadTextFile(`${slug}.md`, formatDeckMarkdown(currentDeck), 'text/markdown;charset=utf-8');
         showToast('Exported Markdown');
       });
 
@@ -384,17 +538,17 @@ function initializeApp() {
       exportJsonBtn.className = 'copy-button secondary-btn';
       exportJsonBtn.textContent = 'Export .json';
       exportJsonBtn.addEventListener('click', () => {
-        downloadTextFile(`${slug}.json`, JSON.stringify(parsed, null, 2), 'application/json;charset=utf-8');
+        downloadTextFile(`${slug}.json`, JSON.stringify(currentDeck, null, 2), 'application/json;charset=utf-8');
         showToast('Exported JSON');
       });
 
-      deckActions.append(copyAllBtn, exportMdBtn, exportJsonBtn);
+      deckActions.append(solveAiBtn, aiProgress, copyAllBtn, exportMdBtn, exportJsonBtn);
       summary.append(deckActions);
     }
 
     solutionEl.append(summary);
 
-    if (parsed.questions.length === 0) {
+    if (currentDeck.questions.length === 0) {
       const emptyMsg = document.createElement('p');
       emptyMsg.className = 'state-message';
       emptyMsg.textContent = 'No quiz questions were found in this slide deck.';
@@ -403,7 +557,7 @@ function initializeApp() {
     }
 
     let searchCount = null;
-    if (parsed.questions.length > 1) {
+    if (currentDeck.questions.length > 1) {
       const searchLandmark = document.createElement('search');
       searchLandmark.className = 'question-search';
 
@@ -421,7 +575,8 @@ function initializeApp() {
       searchCount.setAttribute('aria-live', 'polite');
 
       searchInput.addEventListener('input', () => {
-        renderCards(searchInput.value);
+        activeQuery = searchInput.value;
+        renderCards(activeQuery);
       });
 
       searchLandmark.append(searchLabel, searchInput, searchCount);
@@ -432,13 +587,57 @@ function initializeApp() {
     cardsContainer.id = 'cardsContainer';
     solutionEl.append(cardsContainer);
 
+    function createAiAnswerBox(aiSolution) {
+      const aiBox = document.createElement('div');
+      aiBox.className = 'ai-answer-box';
+
+      const aiRow = document.createElement('div');
+      aiRow.className = 'ai-answer-row';
+
+      const aiTitle = document.createElement('span');
+      aiTitle.className = 'ai-answer-title';
+      aiTitle.textContent = `AGY (${aiSolution.model}): ${aiSolution.answer}`;
+
+      const copyAiBtn = document.createElement('button');
+      copyAiBtn.type = 'button';
+      copyAiBtn.className = 'copy-button secondary-btn';
+      copyAiBtn.textContent = 'Copy AI';
+      copyAiBtn.setAttribute('aria-label', `Copy AI answer ${aiSolution.answer}`);
+      copyAiBtn.addEventListener('click', async () => {
+        const copied = await copyTextToClipboard(aiSolution.answer);
+        showToast(copied ? 'Copied' : 'Copy failed');
+      });
+
+      aiRow.append(aiTitle, copyAiBtn);
+      aiBox.append(aiRow);
+
+      if (aiSolution.reason) {
+        const reasonEl = document.createElement('p');
+        reasonEl.className = 'ai-answer-reason';
+        reasonEl.textContent = aiSolution.reason;
+        aiBox.append(reasonEl);
+      }
+
+      return aiBox;
+    }
+
+    function createAskOneButton(item, index) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'copy-button secondary-btn';
+      btn.textContent = item.aiSolution ? 'Re-solve AGY' : 'Ask AGY';
+      btn.setAttribute('aria-label', `Solve question ${index + 1} with AGY`);
+      btn.addEventListener('click', () => runSolveFlow([item], btn));
+      return btn;
+    }
+
     function renderCards(query = '') {
       cardsContainer.replaceChildren();
-      const filtered = filterQuestions(parsed.questions, query);
+      const filtered = filterQuestions(currentDeck.questions, query);
 
       if (searchCount) {
         searchCount.textContent = query.trim()
-          ? `Showing ${filtered.length} of ${parsed.questions.length} question(s)`
+          ? `Showing ${filtered.length} of ${currentDeck.questions.length} question(s)`
           : '';
       }
 
@@ -451,7 +650,7 @@ function initializeApp() {
       }
 
       filtered.forEach((item) => {
-        const index = parsed.questions.indexOf(item);
+        const index = currentDeck.questions.indexOf(item);
         const card = document.createElement('article');
         card.className = 'question-card';
 
@@ -471,10 +670,18 @@ function initializeApp() {
 
         if (item.type === 'quiz-open') {
           if (item.answers.length === 0) {
-            const note = document.createElement('p');
-            note.className = 'question-note';
-            note.textContent = 'No accepted short answer was returned for this slide.';
-            card.append(note);
+            if (!item.aiSolution) {
+              const note = document.createElement('p');
+              note.className = 'question-note';
+              note.textContent = 'No accepted short answer was returned for this slide.';
+              card.append(note);
+            } else {
+              card.append(createAiAnswerBox(item.aiSolution));
+            }
+            const openActions = document.createElement('div');
+            openActions.className = 'card-actions';
+            openActions.append(createAskOneButton(item, index));
+            card.append(openActions);
           } else {
             item.answers.forEach((answerText) => {
               const row = document.createElement('div');
@@ -506,15 +713,29 @@ function initializeApp() {
             item.options.forEach((option, optIndex) => {
               const li = document.createElement('li');
               const prefix = `${formatOptionLabel(optIndex)}.`;
+              const isAiPick = item.aiSolution?.choiceIndex === optIndex;
               if (option.isCorrect) {
                 li.className = 'choice-item-correct';
                 li.textContent = `${prefix} ${option.title} [Correct]`;
+              } else if (isAiPick) {
+                li.className = 'choice-item-ai';
+                li.textContent = `${prefix} ${option.title} [AI Pick]`;
               } else {
                 li.textContent = `${prefix} ${option.title}`;
               }
               list.append(li);
             });
             card.append(list);
+          }
+
+          if (item.aiSolution) {
+            card.append(createAiAnswerBox(item.aiSolution));
+          } else if (!item.hasCorrectAnswer) {
+            const note = document.createElement('p');
+            note.className = 'question-note';
+            note.textContent =
+              'Correct answer is not exposed in Mentimeter public API for multiple-choice slides.';
+            card.append(note);
           }
 
           const actionsRow = document.createElement('div');
@@ -535,13 +756,9 @@ function initializeApp() {
               showToast(copied ? 'Copied' : 'Copy failed');
             });
             actionsRow.append(copyBtn);
-          } else {
-            const note = document.createElement('p');
-            note.className = 'question-note';
-            note.textContent =
-              'Correct answer is not exposed in Mentimeter public API for multiple-choice slides.';
-            card.append(note);
           }
+
+          actionsRow.append(createAskOneButton(item, index));
 
           const copyQuestionBtn = document.createElement('button');
           copyQuestionBtn.type = 'button';

@@ -466,4 +466,77 @@ describe('script.user.js', () => {
     assert.match(filteredText, /Lovelace/);
     assert.doesNotMatch(filteredText, /Astrolab/);
   });
+
+  it('calls AGY solver endpoint from userscript and displays AI Pick safely via textContent', async () => {
+    const source = await fs.readFile(SCRIPT_PATH, 'utf8');
+    const dom = createMockDom('https://www.menti.com/al742i1zxz7c');
+    let solveRequestBody = null;
+
+    vm.runInNewContext(source, {
+      window: dom.windowObj,
+      document: dom.document,
+      history: dom.history,
+      location: dom.location,
+      fetch: async (url, init = {}) => {
+        if (String(url).endsWith('/api/solve')) {
+          solveRequestBody = JSON.parse(init.body);
+          return {
+            ok: true,
+            status: 200,
+            async json() {
+              return {
+                model: 'gemini-3.8-flash-low',
+                solutions: [
+                  { id: 'q1', choiceIndex: 0, answer: 'Sempoa', reason: 'Menggunakan manik-manik.' },
+                ],
+              };
+            },
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          async json() {
+            return {
+              slide_deck: {
+                name: 'Quiz AI',
+                slides: [
+                  {
+                    slide_public_key: 'q1',
+                    static_content: { type: 'quiz-choice' },
+                    interactive_contents: [
+                      {
+                        title: 'Alat hitung manik?',
+                        choices: [{ title: 'Sempoa' }, { title: 'Astrolab' }],
+                      },
+                    ],
+                  },
+                ],
+              },
+            };
+          },
+        };
+      },
+      navigator: { clipboard: { writeText: async () => {} } },
+      URL,
+      setTimeout,
+      clearTimeout,
+      console,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const solveBtn = dom.body.querySelectorAll('button').find((b) => /Solve with AGY/i.test(b.textContent));
+    assert.ok(solveBtn, 'Expected Solve with AGY button in userscript');
+
+    for (const fn of solveBtn.listeners.get('click') || []) {
+      await fn();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    assert.equal(solveRequestBody.questions[0].id, 'q1');
+    assert.deepEqual(solveRequestBody.questions[0].options, ['Sempoa', 'Astrolab']);
+    assert.match(dom.body.textContent, /\[AI Pick\]/);
+    assert.match(dom.body.textContent, /Menggunakan manik-manik\./);
+    assert.equal(dom.getInnerHtmlAssignments(), 0);
+  });
 });

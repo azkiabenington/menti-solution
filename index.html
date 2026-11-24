@@ -33,14 +33,14 @@
         <div id="statusToast" class="toast" role="status" aria-live="polite"></div>
 
         <form id="getAnswersForm" class="card-panel" novalidate>
-            <label for="mentiLink" class="field-label">Mentimeter link or session code</label>
+            <label for="mentiLink" class="field-label">Mentimeter link, session ID, or 8-digit room code</label>
             <input
                 type="text"
                 id="mentiLink"
                 name="mentiLink"
-                placeholder="https://www.menti.com/al742i1zxz7c"
+                placeholder="https://www.menti.com/al742i1zxz7c or 48139482"
                 autocomplete="url"
-                inputmode="url"
+                inputmode="text"
             >
             <button id="getAnswers" type="submit">Get Answers</button>
         </form>
@@ -65,6 +65,19 @@
                 </div>
             </details>
 
+            <details id="aiContextPanel" class="details-panel">
+                <summary>AGY AI Solver Context (optional study notes)</summary>
+                <div class="details-body">
+                    <label for="aiContextInput" class="field-label">Additional topic or material context</label>
+                    <textarea
+                        id="aiContextInput"
+                        rows="3"
+                        placeholder="Optional subject, definitions, or course notes to guide AGY answers..."
+                    ></textarea>
+                    <p class="hint-text">Connected to AGY on admin-adg using gemini-3.8-flash-low (effort: low).</p>
+                </div>
+            </details>
+
             <details id="rawJsonPanel" class="details-panel">
                 <summary>Paste JSON Payload (offline / no-backend fallback)</summary>
                 <div class="details-body">
@@ -86,7 +99,7 @@
         <aside id="notice" aria-label="Compatibility notice">
             <p>
                 Short-answer slides (<code>quiz-open</code>) expose accepted answers directly in the public Mentimeter payload.
-                Multiple-choice slides (<code>quiz-choice</code>) list available options and mark answers only when provided by the payload.
+                Multiple-choice slides (<code>quiz-choice</code>) list available options and can be solved with AGY (<code>gemini-3.8-flash-low</code>) on <code>admin-adg</code>.
             </p>
             <p class="notice-links">
                 <a href="./script.user.js">Install Userscript (runs directly on menti.com)</a>
