@@ -304,4 +304,38 @@ describe('server endpoints', () => {
     releaseSolve();
     assert.equal((await firstPending).status, 200);
   });
+
+  it('allows up to 4 concurrent /api/solve requests by default for progressive batch solving', async () => {
+    const releases = [];
+    const srv = await startTestServer({
+      solveFn: async ({ questions }) => {
+        await new Promise((resolve) => releases.push(resolve));
+        return {
+          model: 'gemini-3.8-flash-low',
+          effort: 'low',
+          durationMs: 10,
+          solutions: [{ id: questions[0].id, choiceIndex: 0, answer: 'A', reason: 'Ok' }],
+        };
+      },
+    });
+    closers.push(srv.close);
+
+    const makeReq = (i) =>
+      fetch(`${srv.baseUrl}/api/solve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          questions: [{ id: `q${i}`, type: 'quiz-choice', question: `Q${i}?`, options: ['A', 'B'] }],
+        }),
+      });
+
+    const firstFour = [makeReq(1), makeReq(2), makeReq(3), makeReq(4)];
+    await new Promise((r) => setTimeout(r, 25));
+    const fifth = await makeReq(5);
+    assert.equal(fifth.status, 429);
+
+    while (releases.length > 0) releases.shift()();
+    const statuses = (await Promise.all(firstFour)).map((r) => r.status);
+    assert.deepEqual(statuses, [200, 200, 200, 200]);
+  });
 });

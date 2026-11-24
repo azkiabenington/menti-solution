@@ -6,11 +6,13 @@ import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 import {
   buildSlideDeckUrl,
+  buildSolveBatches,
   buildSolveUrl,
   classifyFetchFailure,
   computeNextThemePreference,
   fetchSlideDeck,
   filterQuestions,
+  getUnsolvedQuestions,
   mergeAiSolutions,
   queryLnaPermissionSafe,
   requestAiSolve,
@@ -230,5 +232,43 @@ describe('web UI client helpers', () => {
 
     const html = await fs.readFile(INDEX_HTML_PATH, 'utf8');
     assert.match(html, /id=["']aiContextInput["']/i);
+  });
+
+  it('selects unsolved questions, splits into progressive batches, and forwards abort signal', async () => {
+    const questions = [
+      { id: '1', type: 'quiz-open', question: 'Ada?', answers: ['Lovelace'] },
+      { id: '2', type: 'quiz-open', question: 'Blank?', answers: [] },
+      { id: '3', type: 'quiz-choice', question: 'Q3?', options: [{ title: 'A', isCorrect: true }], hasCorrectAnswer: true },
+      { id: '4', type: 'quiz-choice', question: 'Q4?', options: [{ title: 'A', isCorrect: false }], hasCorrectAnswer: false },
+      { id: '5', type: 'quiz-choice', question: 'Q5?', options: [{ title: 'A', isCorrect: false }], hasCorrectAnswer: false },
+      { id: '6', type: 'quiz-choice', question: 'Q6?', options: [{ title: 'A', isCorrect: false }], hasCorrectAnswer: false },
+      { id: '7', type: 'quiz-choice', question: 'Q7?', options: [{ title: 'A', isCorrect: false }], hasCorrectAnswer: false },
+      { id: '8', type: 'quiz-choice', question: 'Q8?', options: [{ title: 'A', isCorrect: false }], hasCorrectAnswer: false },
+      { id: '9', type: 'quiz-choice', question: 'Q9?', options: [{ title: 'A', isCorrect: false }], hasCorrectAnswer: false },
+    ];
+
+    const unsolved = getUnsolvedQuestions(questions);
+    assert.deepEqual(unsolved.map((q) => q.id), ['2', '4', '5', '6', '7', '8', '9']);
+
+    const batches = buildSolveBatches(unsolved);
+    assert.deepEqual(
+      batches.map((b) => b.map((q) => q.id)),
+      [['2', '4'], ['5', '6', '7'], ['8', '9']],
+    );
+
+    const controller = new AbortController();
+    let seenSignal = null;
+    await requestAiSolve([unsolved[0]], {
+      apiBase: '',
+      signal: controller.signal,
+      fetchFn: async (_url, init) => {
+        seenSignal = init.signal;
+        return new Response(
+          JSON.stringify({ model: 'gemini-3.8-flash-low', solutions: [] }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      },
+    });
+    assert.equal(seenSignal, controller.signal);
   });
 });

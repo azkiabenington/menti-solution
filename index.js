@@ -208,11 +208,32 @@ export function mergeAiSolutions(questions, solutions = [], model = 'gemini-3.8-
   });
 }
 
+export function getUnsolvedQuestions(questions) {
+  if (!Array.isArray(questions)) return [];
+  return questions.filter((item) => {
+    if (item?.type === 'quiz-choice') return !item.hasCorrectAnswer;
+    if (item?.type === 'quiz-open') return !Array.isArray(item.answers) || item.answers.length === 0;
+    return false;
+  });
+}
+
+export function buildSolveBatches(questions, firstBatchSize = 2, nextBatchSize = 3) {
+  if (!Array.isArray(questions) || questions.length === 0) return [];
+  if (questions.length <= firstBatchSize + 1) return [questions.slice()];
+
+  const batches = [questions.slice(0, firstBatchSize)];
+  for (let i = firstBatchSize; i < questions.length; i += nextBatchSize) {
+    batches.push(questions.slice(i, i + nextBatchSize));
+  }
+  return batches;
+}
+
 export async function requestAiSolve(
   questions,
   {
     apiBase = '',
     context = '',
+    signal,
     fetchFn = globalThis.fetch,
     permissions = globalThis.navigator?.permissions,
   } = {},
@@ -243,8 +264,12 @@ export async function requestAiSolve(
         questions: cleanQuestions,
         context: String(context || '').trim(),
       }),
+      signal,
     });
-  } catch {
+  } catch (error) {
+    if (error?.name === 'AbortError' || signal?.aborted) {
+      throw error;
+    }
     if (!apiBase) {
       throw createCodedError(
         'STATIC_CORS_HINT',
@@ -429,10 +454,18 @@ function initializeApp() {
       : 'Active API endpoint: same-origin /api/slide-deck';
   }
 
+  let activeSolveController = null;
+
   function renderParsedDeck(parsed) {
+    activeSolveController?.abort();
+    activeSolveController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const deckSignal = activeSolveController?.signal;
+
     let currentDeck = parsed;
     let activeQuery = '';
     let solving = false;
+    const pendingIds = new Set();
+    const errorById = new Map();
 
     solutionEl.className = 'success';
     solutionEl.removeAttribute('aria-busy');
@@ -456,39 +489,82 @@ function initializeApp() {
     let aiProgress = null;
     let solveAiBtn = null;
 
-    async function runSolveFlow(targetQuestions, triggerBtn) {
+    async function runSolveFlow(targetQuestions, triggerBtn, { progressive = false } = {}) {
       if (solving || targetQuestions.length === 0) return;
       solving = true;
-      if (solveAiBtn) solveAiBtn.disabled = true;
-      if (triggerBtn && triggerBtn !== solveAiBtn) triggerBtn.disabled = true;
+      if (solveAiBtn) {
+        solveAiBtn.disabled = true;
+        solveAiBtn.textContent = 'Solving with AGY...';
+      }
+      if (triggerBtn && triggerBtn !== solveAiBtn) {
+        triggerBtn.disabled = true;
+        triggerBtn.textContent = 'Solving...';
+      }
       if (aiProgress) aiProgress.hidden = false;
 
-      const originalText = triggerBtn?.textContent || '';
-      if (triggerBtn) triggerBtn.textContent = 'Solving...';
+      targetQuestions.forEach((q) => {
+        pendingIds.add(q.id);
+        errorById.delete(q.id);
+      });
+      renderCards(activeQuery);
+
+      const batches = progressive ? buildSolveBatches(targetQuestions) : [targetQuestions];
+      let solvedCount = 0;
+      let lastModel = 'gemini-3.8-flash-low';
+      let lastErrorMessage = '';
 
       try {
-        const result = await requestAiSolve(targetQuestions, {
-          apiBase: activeApiBase,
-          context: aiContextInput?.value || '',
-        });
-        currentDeck = {
-          ...currentDeck,
-          questions: mergeAiSolutions(currentDeck.questions, result.solutions, result.model),
-        };
-        renderCards(activeQuery);
-        showToast(`AGY solved ${result.solutions.length} question(s) (${result.model})`);
-      } catch (error) {
-        showToast(error?.message || 'AGY solver failed');
-      } finally {
-        solving = false;
-        if (aiProgress) aiProgress.hidden = true;
-        if (solveAiBtn) {
-          solveAiBtn.disabled = false;
-          if (triggerBtn === solveAiBtn) solveAiBtn.textContent = originalText || 'Solve with AGY';
+        await Promise.all(
+          batches.map(async (batch) => {
+            try {
+              const result = await requestAiSolve(batch, {
+                apiBase: activeApiBase,
+                context: aiContextInput?.value || '',
+                signal: deckSignal,
+              });
+              if (deckSignal?.aborted) return;
+
+              lastModel = result.model || lastModel;
+              solvedCount += result.solutions.length;
+              batch.forEach((q) => pendingIds.delete(q.id));
+              currentDeck = {
+                ...currentDeck,
+                questions: mergeAiSolutions(currentDeck.questions, result.solutions, lastModel),
+              };
+              renderCards(activeQuery);
+            } catch (error) {
+              if (error?.name === 'AbortError' || deckSignal?.aborted) return;
+              lastErrorMessage = error?.message || 'AGY solver failed';
+              batch.forEach((q) => {
+                pendingIds.delete(q.id);
+                errorById.set(q.id, lastErrorMessage);
+              });
+              renderCards(activeQuery);
+            }
+          }),
+        );
+
+        if (!deckSignal?.aborted) {
+          if (solvedCount > 0) {
+            showToast(`AGY solved ${solvedCount} question(s) (${lastModel})`);
+          } else if (lastErrorMessage) {
+            showToast(lastErrorMessage);
+          }
         }
-        if (triggerBtn && triggerBtn !== solveAiBtn) {
-          triggerBtn.disabled = false;
-          triggerBtn.textContent = originalText || 'Ask AGY';
+      } finally {
+        if (!deckSignal?.aborted) {
+          solving = false;
+          if (aiProgress) aiProgress.hidden = true;
+          if (solveAiBtn) {
+            solveAiBtn.disabled = false;
+            solveAiBtn.textContent = currentDeck.questions.some((q) => q.aiSolution)
+              ? 'Re-solve with AGY'
+              : 'Solve with AGY';
+          }
+          if (triggerBtn && triggerBtn !== solveAiBtn) {
+            triggerBtn.disabled = false;
+            triggerBtn.textContent = 'Ask AGY';
+          }
         }
       }
     }
@@ -670,13 +746,23 @@ function initializeApp() {
 
         if (item.type === 'quiz-open') {
           if (item.answers.length === 0) {
-            if (!item.aiSolution) {
+            if (item.aiSolution) {
+              card.append(createAiAnswerBox(item.aiSolution));
+            } else if (pendingIds.has(item.id)) {
+              const note = document.createElement('p');
+              note.className = 'question-note question-note-pending';
+              note.textContent = 'AGY (gemini-3.8-flash-low) sedang mencari jawaban...';
+              card.append(note);
+            } else if (errorById.has(item.id)) {
+              const errNote = document.createElement('p');
+              errNote.className = 'question-note question-note-error';
+              errNote.textContent = `AGY gagal menjawab: ${errorById.get(item.id)}`;
+              card.append(errNote);
+            } else {
               const note = document.createElement('p');
               note.className = 'question-note';
               note.textContent = 'No accepted short answer was returned for this slide.';
               card.append(note);
-            } else {
-              card.append(createAiAnswerBox(item.aiSolution));
             }
             const openActions = document.createElement('div');
             openActions.className = 'card-actions';
@@ -730,6 +816,16 @@ function initializeApp() {
 
           if (item.aiSolution) {
             card.append(createAiAnswerBox(item.aiSolution));
+          } else if (pendingIds.has(item.id)) {
+            const pendingNote = document.createElement('p');
+            pendingNote.className = 'question-note question-note-pending';
+            pendingNote.textContent = 'AGY (gemini-3.8-flash-low) sedang mencari jawaban...';
+            card.append(pendingNote);
+          } else if (errorById.has(item.id)) {
+            const errNote = document.createElement('p');
+            errNote.className = 'question-note question-note-error';
+            errNote.textContent = `AGY gagal menjawab: ${errorById.get(item.id)}`;
+            card.append(errNote);
           } else if (!item.hasCorrectAnswer) {
             const note = document.createElement('p');
             note.className = 'question-note';
@@ -778,9 +874,15 @@ function initializeApp() {
     }
 
     renderCards('');
+
+    const autoTargets = getUnsolvedQuestions(currentDeck.questions);
+    if (autoTargets.length > 0) {
+      runSolveFlow(autoTargets, solveAiBtn, { progressive: true });
+    }
   }
 
   async function handleLookup(rawLink) {
+    activeSolveController?.abort();
     const sessionId = extractMentiSessionId(rawLink);
     if (!sessionId) {
       setStatusState('error', 'Please enter a valid menti.com link or session code.');

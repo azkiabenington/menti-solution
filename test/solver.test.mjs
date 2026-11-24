@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import {
   AGY_EFFORT,
   AGY_MODEL,
+  DEFAULT_SOLVE_TIMEOUT_MS,
   buildSolvePrompt,
   parseAgySolverOutput,
   runAgySolver,
@@ -11,9 +12,10 @@ import {
 } from '../solver.mjs';
 
 describe('AGY solver helpers', () => {
-  it('locks model configuration to gemini-3.8-flash-low with low effort', () => {
+  it('locks model configuration to gemini-3.8-flash-low with low effort and 90s timeout', () => {
     assert.equal(AGY_MODEL, 'gemini-3.8-flash-low');
     assert.equal(AGY_EFFORT, 'low');
+    assert.equal(DEFAULT_SOLVE_TIMEOUT_MS, 90000);
   });
 
   it('validates and normalizes solve payloads while rejecting malformed or oversized requests', () => {
@@ -133,5 +135,7 @@ describe('AGY solver helpers', () => {
       'Context',
     );
     assert.match(prompt, /Context/);
+    assert.match(prompt, /NEVER call run_command/i);
+    assert.match(prompt, /ONE parallel batch of search_web/i);
   });
 });

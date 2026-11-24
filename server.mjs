@@ -128,7 +128,7 @@ export function createServerHandler({
   allowedOrigins = '*',
   timeoutMs = 10000,
   solveFn = (payload) => runAgySolver(payload),
-  maxConcurrentSolves = 3,
+  maxConcurrentSolves = 4,
 } = {}) {
   const allowedOriginPolicy = parseAllowedOrigins(allowedOrigins);
   let activeSolves = 0;

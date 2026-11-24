@@ -507,6 +507,16 @@ progress.loading-spinner[hidden] {
     color: var(--text-muted);
 }
 
+.question-note-pending {
+    color: var(--accent-text);
+    font-weight: 600;
+}
+
+.question-note-error {
+    color: var(--error-text);
+    font-weight: 600;
+}
+
 #notice {
     background-color: var(--bg-surface);
     color: var(--text-primary);
