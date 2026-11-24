@@ -9,6 +9,7 @@ import {
   classifyFetchFailure,
   computeNextThemePreference,
   fetchSlideDeck,
+  filterQuestions,
   queryLnaPermissionSafe,
 } from '../index.js';
 
@@ -152,5 +153,27 @@ describe('web UI client helpers', () => {
       }),
       (err) => err.code === 'LNA_DENIED' && /Local network/i.test(err.message),
     );
+  });
+
+  it('filters questions by question text, option labels, or answers case-insensitively', () => {
+    const questions = [
+      {
+        id: '1',
+        type: 'quiz-choice',
+        question: 'ENIAC adalah komputer apa?',
+        options: [{ title: 'Komputer digital elektronik', isCorrect: false }],
+      },
+      {
+        id: '2',
+        type: 'quiz-open',
+        question: 'Nama belakang Ada?',
+        answers: ['Lovelace'],
+      },
+    ];
+
+    assert.equal(filterQuestions(questions, '').length, 2);
+    assert.deepEqual(filterQuestions(questions, 'lovelace').map((q) => q.id), ['2']);
+    assert.deepEqual(filterQuestions(questions, 'elektronik').map((q) => q.id), ['1']);
+    assert.equal(filterQuestions(questions, 'nonexistent').length, 0);
   });
 });

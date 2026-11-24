@@ -397,4 +397,73 @@ describe('script.user.js', () => {
     assert.match(copiedTexts[0], /1\. Alat hitung\?\nA\. Sempoa\nB\. Astrolab/);
     assert.match(copiedTexts[1], /^Quiz: Quiz Copy\n\n1\. Alat hitung\?/);
   });
+
+  it('renders room code, countdown, A/B/C/D options, and live question search filter in userscript', async () => {
+    const source = await fs.readFile(SCRIPT_PATH, 'utf8');
+    const dom = createMockDom('https://www.menti.com/al742i1zxz7c');
+
+    vm.runInNewContext(source, {
+      window: dom.windowObj,
+      document: dom.document,
+      history: dom.history,
+      location: dom.location,
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            slide_deck: {
+              name: 'Quiz Features',
+              participation_settings: { participation_code: 48139482 },
+              slides: [
+                {
+                  slide_public_key: 'q1',
+                  static_content: { type: 'quiz-choice' },
+                  interactive_contents: [
+                    {
+                      title: 'Alat hitung?',
+                      countdown: 30,
+                      choices: [{ title: 'Sempoa' }, { title: 'Astrolab' }],
+                    },
+                  ],
+                },
+                {
+                  slide_public_key: 'q2',
+                  static_content: { type: 'quiz-open' },
+                  interactive_contents: [
+                    {
+                      title: 'Nama belakang Ada?',
+                      countdown: 45,
+                      choices: [{ title: 'Lovelace' }],
+                    },
+                  ],
+                },
+              ],
+            },
+          };
+        },
+      }),
+      navigator: { clipboard: { writeText: async () => {} } },
+      URL,
+      setTimeout,
+      clearTimeout,
+      console,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const text = dom.body.textContent;
+    assert.match(text, /48139482/);
+    assert.match(text, /30s/);
+    assert.match(text, /A\. Sempoa/);
+
+    const inputs = dom.body.querySelectorAll('input');
+    assert.equal(inputs.length, 1);
+    inputs[0].value = 'Lovelace';
+    for (const fn of inputs[0].listeners.get('input') || []) {
+      fn();
+    }
+    const filteredText = dom.body.textContent;
+    assert.match(filteredText, /Lovelace/);
+    assert.doesNotMatch(filteredText, /Astrolab/);
+  });
 });

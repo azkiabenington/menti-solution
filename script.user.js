@@ -37,11 +37,42 @@
     return typeof value === 'string' ? value.trim() : '';
   }
 
+  function normalizeCountdown(value) {
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+  }
+
+  function formatOptionLabel(index) {
+    return index < 26 ? String.fromCharCode(65 + index) : String(index + 1);
+  }
+
+  function filterQuestions(questions, query = '') {
+    if (!Array.isArray(questions)) return [];
+    const q = String(query || '').trim().toLowerCase();
+    if (!q) return questions;
+
+    return questions.filter((item) => {
+      if (String(item?.question || '').toLowerCase().includes(q)) return true;
+      if (Array.isArray(item?.answers) && item.answers.some((ans) => String(ans).toLowerCase().includes(q))) {
+        return true;
+      }
+      if (Array.isArray(item?.options) && item.options.some((opt) => String(opt?.title || '').toLowerCase().includes(q))) {
+        return true;
+      }
+      return false;
+    });
+  }
+
   function parseSlideDeck(payload) {
     const slides = payload?.slide_deck?.slides;
     if (!Array.isArray(slides)) {
       throw new Error('Unexpected Mentimeter slide-deck response format.');
     }
+
+    const rawCode = payload.slide_deck.participation_settings?.participation_code;
+    const participationCode =
+      rawCode !== null && rawCode !== undefined && String(rawCode).trim()
+        ? String(rawCode).trim()
+        : null;
 
     const questions = [];
     for (let i = 0; i < slides.length; i += 1) {
@@ -52,12 +83,14 @@
       const contents = Array.isArray(slide.interactive_contents) ? slide.interactive_contents : [];
       const primary = contents[0];
       const question = nonEmptyText(primary?.title) || nonEmptyText(slide?.title);
+      const countdown = normalizeCountdown(primary?.countdown ?? slide?.countdown ?? null);
       const choices = contents.flatMap((item) => (Array.isArray(item?.choices) ? item.choices : []));
 
       if (slideType === 'quiz-open') {
         questions.push({
           type: 'quiz-open',
           question,
+          countdown,
           answers: choices.map((c) => nonEmptyText(c?.title)).filter(Boolean),
         });
       } else {
@@ -70,6 +103,7 @@
         questions.push({
           type: 'quiz-choice',
           question,
+          countdown,
           options,
           hasCorrectAnswer: options.some((o) => o.isCorrect),
         });
@@ -78,6 +112,7 @@
 
     return {
       deckTitle: nonEmptyText(payload.slide_deck.name),
+      participationCode,
       totalSlides: slides.length,
       questions,
     };
@@ -106,7 +141,8 @@
       #${PANEL_ID} .ms-btn:active {
         transform: translateY(1px);
       }
-      #${PANEL_ID} .ms-btn:focus-visible {
+      #${PANEL_ID} .ms-btn:focus-visible,
+      #${PANEL_ID} input:focus-visible {
         outline: 2px solid #a5b4fc;
         outline-offset: 2px;
       }
@@ -272,7 +308,9 @@
 
   function renderResults(parsed) {
     ensurePanel();
-    statusEl.textContent = `${parsed.deckTitle || 'Mentimeter Quiz'} (${parsed.questions.length} question(s))`;
+    const roomPart = parsed.participationCode ? ` | Room ${parsed.participationCode}` : '';
+    statusEl.textContent =
+      `${parsed.deckTitle || 'Mentimeter Quiz'} (${parsed.questions.length} question(s)${roomPart})`;
     bodyEl.replaceChildren();
 
     if (parsed.questions.length === 0) {
@@ -287,83 +325,135 @@
     copyAllBtn.style.alignSelf = 'flex-start';
     bodyEl.appendChild(copyAllBtn);
 
-    parsed.questions.forEach((item, index) => {
-      const card = document.createElement('div');
-      card.style.backgroundColor = '#242a38';
-      card.style.border = '1px solid #6b7892';
-      card.style.borderRadius = '8px';
-      card.style.padding = '12px';
+    let searchInput = null;
+    if (parsed.questions.length > 1) {
+      const searchBox = document.createElement('search');
+      searchInput = document.createElement('input');
+      searchInput.type = 'search';
+      searchInput.placeholder = 'Filter questions, options, or answers...';
+      searchInput.setAttribute('aria-label', 'Filter questions');
+      searchInput.style.width = '100%';
+      searchInput.style.minHeight = '44px';
+      searchInput.style.padding = '8px 10px';
+      searchInput.style.borderRadius = '6px';
+      searchInput.style.border = '1px solid #6b7892';
+      searchInput.style.backgroundColor = '#111827';
+      searchInput.style.color = '#eef2f7';
+      searchInput.style.fontSize = '13px';
+      searchInput.style.boxSizing = 'border-box';
+      searchInput.addEventListener('input', () => {
+        renderCards(searchInput.value);
+      });
+      searchBox.appendChild(searchInput);
+      bodyEl.appendChild(searchBox);
+    }
 
-      const qTitle = document.createElement('div');
-      qTitle.textContent = `${index + 1}. ${item.question || 'Untitled question'}`;
-      qTitle.style.fontWeight = '600';
-      qTitle.style.marginBottom = '8px';
-      qTitle.style.color = '#a5b4fc';
-      card.appendChild(qTitle);
+    const cardsContainer = document.createElement('div');
+    cardsContainer.style.display = 'flex';
+    cardsContainer.style.flexDirection = 'column';
+    cardsContainer.style.gap = '10px';
+    bodyEl.appendChild(cardsContainer);
 
-      if (item.type === 'quiz-open') {
-        if (item.answers.length === 0) {
-          const note = document.createElement('p');
-          note.textContent = 'No accepted short answer was returned for this slide.';
-          note.style.margin = '4px 0 0';
-          note.style.fontSize = '12px';
-          note.style.color = '#b8c2d1';
-          card.appendChild(note);
-        } else {
-          item.answers.forEach((ans) => {
-            const row = document.createElement('div');
-            row.style.display = 'flex';
-            row.style.alignItems = 'center';
-            row.style.justifyContent = 'space-between';
-            row.style.gap = '8px';
-            row.style.marginTop = '6px';
+    function renderCards(query = '') {
+      cardsContainer.replaceChildren();
+      const filtered = filterQuestions(parsed.questions, query);
 
-            const ansSpan = document.createElement('span');
-            ansSpan.textContent = `Answer: ${ans}`;
-            ansSpan.style.color = '#6ee7b7';
-            ansSpan.style.fontWeight = '700';
-
-            const copyBtn = makeCopyButton('Copy', () => ans);
-            copyBtn.setAttribute('aria-label', `Copy answer ${ans}`);
-
-            row.append(ansSpan, copyBtn);
-            card.appendChild(row);
-          });
-        }
-      } else {
-        const list = document.createElement('ul');
-        list.style.margin = '4px 0 0 18px';
-        list.style.padding = '0';
-
-        item.options.forEach((opt) => {
-          const li = document.createElement('li');
-          li.textContent = opt.isCorrect ? `${opt.title} [Correct]` : opt.title;
-          if (opt.isCorrect) li.style.color = '#6ee7b7';
-          list.appendChild(li);
-        });
-        card.appendChild(list);
-
-        if (!item.hasCorrectAnswer) {
-          const note = document.createElement('p');
-          note.textContent = 'Multiple-choice correct answers are not exposed in public API.';
-          note.style.margin = '8px 0 0';
-          note.style.fontSize = '12px';
-          note.style.color = '#b8c2d1';
-          card.appendChild(note);
-        }
-
-        const copyQuestionBtn = makeCopyButton(
-          'Copy Question + Options',
-          () => formatQuestionPrompt(item, index),
-          true,
-        );
-        copyQuestionBtn.style.marginTop = '8px';
-        copyQuestionBtn.setAttribute('aria-label', `Copy question ${index + 1} and options`);
-        card.appendChild(copyQuestionBtn);
+      if (filtered.length === 0) {
+        const noMatch = document.createElement('p');
+        noMatch.textContent = 'No questions match your filter.';
+        noMatch.style.margin = '0';
+        noMatch.style.fontSize = '13px';
+        noMatch.style.color = '#b8c2d1';
+        cardsContainer.appendChild(noMatch);
+        return;
       }
 
-      bodyEl.appendChild(card);
-    });
+      filtered.forEach((item) => {
+        const index = parsed.questions.indexOf(item);
+        const card = document.createElement('div');
+        card.style.backgroundColor = '#242a38';
+        card.style.border = '1px solid #6b7892';
+        card.style.borderRadius = '8px';
+        card.style.padding = '12px';
+
+        const qTitle = document.createElement('div');
+        const timerText = item.countdown ? ` (${item.countdown}s)` : '';
+        qTitle.textContent = `${index + 1}. ${item.question || 'Untitled question'}${timerText}`;
+        qTitle.style.fontWeight = '600';
+        qTitle.style.marginBottom = '8px';
+        qTitle.style.color = '#a5b4fc';
+        card.appendChild(qTitle);
+
+        if (item.type === 'quiz-open') {
+          if (item.answers.length === 0) {
+            const note = document.createElement('p');
+            note.textContent = 'No accepted short answer was returned for this slide.';
+            note.style.margin = '4px 0 0';
+            note.style.fontSize = '12px';
+            note.style.color = '#b8c2d1';
+            card.appendChild(note);
+          } else {
+            item.answers.forEach((ans) => {
+              const row = document.createElement('div');
+              row.style.display = 'flex';
+              row.style.alignItems = 'center';
+              row.style.justifyContent = 'space-between';
+              row.style.gap = '8px';
+              row.style.marginTop = '6px';
+
+              const ansSpan = document.createElement('span');
+              ansSpan.textContent = `Answer: ${ans}`;
+              ansSpan.style.color = '#6ee7b7';
+              ansSpan.style.fontWeight = '700';
+
+              const copyBtn = makeCopyButton('Copy', () => ans);
+              copyBtn.setAttribute('aria-label', `Copy answer ${ans}`);
+
+              row.append(ansSpan, copyBtn);
+              card.appendChild(row);
+            });
+          }
+        } else {
+          const list = document.createElement('ol');
+          list.style.margin = '4px 0 0';
+          list.style.padding = '0';
+          list.style.listStyle = 'none';
+
+          item.options.forEach((opt, optIndex) => {
+            const li = document.createElement('li');
+            const label = formatOptionLabel(optIndex);
+            li.textContent = opt.isCorrect
+              ? `${label}. ${opt.title} [Correct]`
+              : `${label}. ${opt.title}`;
+            if (opt.isCorrect) li.style.color = '#6ee7b7';
+            list.appendChild(li);
+          });
+          card.appendChild(list);
+
+          if (!item.hasCorrectAnswer) {
+            const note = document.createElement('p');
+            note.textContent = 'Multiple-choice correct answers are not exposed in public API.';
+            note.style.margin = '8px 0 0';
+            note.style.fontSize = '12px';
+            note.style.color = '#b8c2d1';
+            card.appendChild(note);
+          }
+
+          const copyQuestionBtn = makeCopyButton(
+            'Copy Question + Options',
+            () => formatQuestionPrompt(item, index),
+            true,
+          );
+          copyQuestionBtn.style.marginTop = '8px';
+          copyQuestionBtn.setAttribute('aria-label', `Copy question ${index + 1} and options`);
+          card.appendChild(copyQuestionBtn);
+        }
+
+        cardsContainer.appendChild(card);
+      });
+    }
+
+    renderCards('');
   }
 
   async function loadSession(force = false) {

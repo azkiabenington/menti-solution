@@ -1,6 +1,8 @@
 import {
   extractMentiSessionId,
+  formatDeckMarkdown,
   formatDeckPrompt,
+  formatOptionLabel,
   formatQuestionPrompt,
   parseSlideDeckPayload,
 } from './parser.js';
@@ -17,6 +19,44 @@ export function buildSlideDeckUrl(sessionId, apiBase = '') {
   const cleanBase = normalizeApiBase(apiBase);
   const path = `/api/slide-deck?sessionId=${encodeURIComponent(sessionId)}`;
   return cleanBase ? `${cleanBase}${path}` : path;
+}
+
+export function filterQuestions(questions, query = '') {
+  if (!Array.isArray(questions)) return [];
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return questions;
+
+  return questions.filter((item) => {
+    if (String(item?.question || '').toLowerCase().includes(q)) return true;
+    if (Array.isArray(item?.answers) && item.answers.some((ans) => String(ans).toLowerCase().includes(q))) {
+      return true;
+    }
+    if (Array.isArray(item?.options) && item.options.some((opt) => String(opt?.title || '').toLowerCase().includes(q))) {
+      return true;
+    }
+    return false;
+  });
+}
+
+function buildExportSlug(title) {
+  const base = String(title || 'mentimeter-quiz')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return base || 'mentimeter-quiz';
+}
+
+function downloadTextFile(filename, content, mimeType) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.hidden = true;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 // Two-state color scheme toggle: returns null when reverting to OS preference.
@@ -305,13 +345,17 @@ function initializeApp() {
     const countsEl = document.createElement('p');
     const openCount = parsed.questions.filter((q) => q.type === 'quiz-open').length;
     const choiceCount = parsed.questions.filter((q) => q.type === 'quiz-choice').length;
+    const roomPart = parsed.participationCode ? ` | Room: ${parsed.participationCode}` : '';
     countsEl.textContent =
-      `Slides: ${parsed.totalSlides} total | Questions: ${parsed.questions.length} ` +
+      `Slides: ${parsed.totalSlides} total${roomPart} | Questions: ${parsed.questions.length} ` +
       `(${openCount} short-answer, ${choiceCount} multiple-choice)`;
     summaryText.append(titleEl, countsEl);
     summary.append(summaryText);
 
     if (parsed.questions.length > 0) {
+      const deckActions = document.createElement('div');
+      deckActions.className = 'deck-actions';
+
       const copyAllBtn = document.createElement('button');
       copyAllBtn.type = 'button';
       copyAllBtn.id = 'copyAllBtn';
@@ -321,7 +365,31 @@ function initializeApp() {
         const copied = await copyTextToClipboard(formatDeckPrompt(parsed));
         showToast(copied ? 'Copied all questions' : 'Copy failed');
       });
-      summary.append(copyAllBtn);
+
+      const slug = buildExportSlug(parsed.deckTitle);
+
+      const exportMdBtn = document.createElement('button');
+      exportMdBtn.type = 'button';
+      exportMdBtn.id = 'exportMdBtn';
+      exportMdBtn.className = 'copy-button secondary-btn';
+      exportMdBtn.textContent = 'Export .md';
+      exportMdBtn.addEventListener('click', () => {
+        downloadTextFile(`${slug}.md`, formatDeckMarkdown(parsed), 'text/markdown;charset=utf-8');
+        showToast('Exported Markdown');
+      });
+
+      const exportJsonBtn = document.createElement('button');
+      exportJsonBtn.type = 'button';
+      exportJsonBtn.id = 'exportJsonBtn';
+      exportJsonBtn.className = 'copy-button secondary-btn';
+      exportJsonBtn.textContent = 'Export .json';
+      exportJsonBtn.addEventListener('click', () => {
+        downloadTextFile(`${slug}.json`, JSON.stringify(parsed, null, 2), 'application/json;charset=utf-8');
+        showToast('Exported JSON');
+      });
+
+      deckActions.append(copyAllBtn, exportMdBtn, exportJsonBtn);
+      summary.append(deckActions);
     }
 
     solutionEl.append(summary);
@@ -334,102 +402,165 @@ function initializeApp() {
       return;
     }
 
-    parsed.questions.forEach((item, index) => {
-      const card = document.createElement('article');
-      card.className = 'question-card';
+    let searchCount = null;
+    if (parsed.questions.length > 1) {
+      const searchLandmark = document.createElement('search');
+      searchLandmark.className = 'question-search';
 
-      const heading = document.createElement('h3');
-      heading.textContent = `${index + 1}. ${item.question || 'Untitled question'}`;
-      card.append(heading);
+      const searchLabel = document.createElement('label');
+      searchLabel.setAttribute('for', 'questionFilterInput');
+      searchLabel.textContent = 'Filter questions';
 
-      if (item.type === 'quiz-open') {
-        if (item.answers.length === 0) {
-          const note = document.createElement('p');
-          note.className = 'question-note';
-          note.textContent = 'No accepted short answer was returned for this slide.';
-          card.append(note);
-        } else {
-          item.answers.forEach((answerText) => {
-            const row = document.createElement('div');
-            row.className = 'answer-row';
+      const searchInput = document.createElement('input');
+      searchInput.type = 'search';
+      searchInput.id = 'questionFilterInput';
+      searchInput.placeholder = 'Search question text, option, or accepted answer...';
 
-            const label = document.createElement('span');
-            label.className = 'answer-text';
-            label.textContent = `Answer: ${answerText}`;
+      searchCount = document.createElement('p');
+      searchCount.className = 'search-meta';
+      searchCount.setAttribute('aria-live', 'polite');
 
+      searchInput.addEventListener('input', () => {
+        renderCards(searchInput.value);
+      });
+
+      searchLandmark.append(searchLabel, searchInput, searchCount);
+      solutionEl.append(searchLandmark);
+    }
+
+    const cardsContainer = document.createElement('div');
+    cardsContainer.id = 'cardsContainer';
+    solutionEl.append(cardsContainer);
+
+    function renderCards(query = '') {
+      cardsContainer.replaceChildren();
+      const filtered = filterQuestions(parsed.questions, query);
+
+      if (searchCount) {
+        searchCount.textContent = query.trim()
+          ? `Showing ${filtered.length} of ${parsed.questions.length} question(s)`
+          : '';
+      }
+
+      if (filtered.length === 0) {
+        const noMatch = document.createElement('p');
+        noMatch.className = 'state-message';
+        noMatch.textContent = 'No questions match your filter.';
+        cardsContainer.append(noMatch);
+        return;
+      }
+
+      filtered.forEach((item) => {
+        const index = parsed.questions.indexOf(item);
+        const card = document.createElement('article');
+        card.className = 'question-card';
+
+        const cardHeader = document.createElement('div');
+        cardHeader.className = 'question-header';
+        const heading = document.createElement('h3');
+        heading.textContent = `${index + 1}. ${item.question || 'Untitled question'}`;
+        cardHeader.append(heading);
+
+        if (item.countdown) {
+          const timerBadge = document.createElement('span');
+          timerBadge.className = 'countdown-badge';
+          timerBadge.textContent = `${item.countdown}s`;
+          cardHeader.append(timerBadge);
+        }
+        card.append(cardHeader);
+
+        if (item.type === 'quiz-open') {
+          if (item.answers.length === 0) {
+            const note = document.createElement('p');
+            note.className = 'question-note';
+            note.textContent = 'No accepted short answer was returned for this slide.';
+            card.append(note);
+          } else {
+            item.answers.forEach((answerText) => {
+              const row = document.createElement('div');
+              row.className = 'answer-row';
+
+              const label = document.createElement('span');
+              label.className = 'answer-text';
+              label.textContent = `Answer: ${answerText}`;
+
+              const copyBtn = document.createElement('button');
+              copyBtn.type = 'button';
+              copyBtn.className = 'copy-button';
+              copyBtn.textContent = 'Copy';
+              copyBtn.setAttribute('aria-label', `Copy answer ${answerText}`);
+              copyBtn.addEventListener('click', async () => {
+                const copied = await copyTextToClipboard(answerText);
+                showToast(copied ? 'Copied' : 'Copy failed');
+              });
+
+              row.append(label, copyBtn);
+              card.append(row);
+            });
+          }
+        } else if (item.type === 'quiz-choice') {
+          if (item.options.length > 0) {
+            const list = document.createElement('ol');
+            list.className = 'choice-list';
+
+            item.options.forEach((option, optIndex) => {
+              const li = document.createElement('li');
+              const prefix = `${formatOptionLabel(optIndex)}.`;
+              if (option.isCorrect) {
+                li.className = 'choice-item-correct';
+                li.textContent = `${prefix} ${option.title} [Correct]`;
+              } else {
+                li.textContent = `${prefix} ${option.title}`;
+              }
+              list.append(li);
+            });
+            card.append(list);
+          }
+
+          const actionsRow = document.createElement('div');
+          actionsRow.className = 'card-actions';
+
+          if (item.hasCorrectAnswer) {
+            const correctText = item.options
+              .filter((o) => o.isCorrect)
+              .map((o) => o.title)
+              .join(', ');
             const copyBtn = document.createElement('button');
             copyBtn.type = 'button';
             copyBtn.className = 'copy-button';
-            copyBtn.textContent = 'Copy';
-            copyBtn.setAttribute('aria-label', `Copy answer ${answerText}`);
+            copyBtn.textContent = 'Copy Correct';
+            copyBtn.setAttribute('aria-label', `Copy correct answer ${correctText}`);
             copyBtn.addEventListener('click', async () => {
-              const copied = await copyTextToClipboard(answerText);
+              const copied = await copyTextToClipboard(correctText);
               showToast(copied ? 'Copied' : 'Copy failed');
             });
+            actionsRow.append(copyBtn);
+          } else {
+            const note = document.createElement('p');
+            note.className = 'question-note';
+            note.textContent =
+              'Correct answer is not exposed in Mentimeter public API for multiple-choice slides.';
+            card.append(note);
+          }
 
-            row.append(label, copyBtn);
-            card.append(row);
+          const copyQuestionBtn = document.createElement('button');
+          copyQuestionBtn.type = 'button';
+          copyQuestionBtn.className = 'copy-button secondary-btn';
+          copyQuestionBtn.textContent = 'Copy Question + Options';
+          copyQuestionBtn.setAttribute('aria-label', `Copy question ${index + 1} and options`);
+          copyQuestionBtn.addEventListener('click', async () => {
+            const copied = await copyTextToClipboard(formatQuestionPrompt(item, index));
+            showToast(copied ? 'Copied question' : 'Copy failed');
           });
-        }
-      } else if (item.type === 'quiz-choice') {
-        if (item.options.length > 0) {
-          const list = document.createElement('ul');
-          list.className = 'choice-list';
-
-          item.options.forEach((option) => {
-            const li = document.createElement('li');
-            if (option.isCorrect) {
-              li.className = 'choice-item-correct';
-              li.textContent = `${option.title} [Correct]`;
-            } else {
-              li.textContent = option.title;
-            }
-            list.append(li);
-          });
-          card.append(list);
-        }
-
-        const actionsRow = document.createElement('div');
-        actionsRow.className = 'card-actions';
-
-        if (item.hasCorrectAnswer) {
-          const correctText = item.options
-            .filter((o) => o.isCorrect)
-            .map((o) => o.title)
-            .join(', ');
-          const copyBtn = document.createElement('button');
-          copyBtn.type = 'button';
-          copyBtn.className = 'copy-button';
-          copyBtn.textContent = 'Copy Correct';
-          copyBtn.setAttribute('aria-label', `Copy correct answer ${correctText}`);
-          copyBtn.addEventListener('click', async () => {
-            const copied = await copyTextToClipboard(correctText);
-            showToast(copied ? 'Copied' : 'Copy failed');
-          });
-          actionsRow.append(copyBtn);
-        } else {
-          const note = document.createElement('p');
-          note.className = 'question-note';
-          note.textContent =
-            'Correct answer is not exposed in Mentimeter public API for multiple-choice slides.';
-          card.append(note);
+          actionsRow.append(copyQuestionBtn);
+          card.append(actionsRow);
         }
 
-        const copyQuestionBtn = document.createElement('button');
-        copyQuestionBtn.type = 'button';
-        copyQuestionBtn.className = 'copy-button secondary-btn';
-        copyQuestionBtn.textContent = 'Copy Question + Options';
-        copyQuestionBtn.setAttribute('aria-label', `Copy question ${index + 1} and options`);
-        copyQuestionBtn.addEventListener('click', async () => {
-          const copied = await copyTextToClipboard(formatQuestionPrompt(item, index));
-          showToast(copied ? 'Copied question' : 'Copy failed');
-        });
-        actionsRow.append(copyQuestionBtn);
-        card.append(actionsRow);
-      }
+        cardsContainer.append(card);
+      });
+    }
 
-      solutionEl.append(card);
-    });
+    renderCards('');
   }
 
   async function handleLookup(rawLink) {

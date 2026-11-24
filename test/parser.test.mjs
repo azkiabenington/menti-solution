@@ -6,6 +6,7 @@ import {
   parseSlideDeckPayload,
   formatQuestionPrompt,
   formatDeckPrompt,
+  formatDeckMarkdown,
 } from '../parser.js';
 
 describe('isValidSessionId', () => {
@@ -47,6 +48,7 @@ describe('parseSlideDeckPayload', () => {
     const payload = {
       slide_deck: {
         name: 'Kuis Sejarah Komputer',
+        participation_settings: { participation_code: 48139482 },
         slides: [
           {
             slide_public_key: 'intro1',
@@ -61,6 +63,7 @@ describe('parseSlideDeckPayload', () => {
             interactive_contents: [
               {
                 title: 'Alat hitung apakah yang menggunakan manik-manik?',
+                countdown: 30,
                 choices: [
                   { title: 'Sempoa' },
                   { title: 'Astrolab' },
@@ -77,6 +80,7 @@ describe('parseSlideDeckPayload', () => {
             interactive_contents: [
               {
                 title: 'Apa nama keluarga Ada?',
+                countdown: 30,
                 choices: [{ title: 'Lovelace' }, { title: '  ' }],
               },
             ],
@@ -99,6 +103,7 @@ describe('parseSlideDeckPayload', () => {
 
     const result = parseSlideDeckPayload(payload);
     assert.equal(result.deckTitle, 'Kuis Sejarah Komputer');
+    assert.equal(result.participationCode, '48139482');
     assert.equal(result.totalSlides, 5);
     assert.equal(result.questions.length, 3);
 
@@ -106,6 +111,7 @@ describe('parseSlideDeckPayload', () => {
       id: 'q1',
       type: 'quiz-choice',
       question: 'Alat hitung apakah yang menggunakan manik-manik?',
+      countdown: 30,
       options: [
         { title: 'Sempoa', isCorrect: false },
         { title: 'Astrolab', isCorrect: false },
@@ -119,6 +125,7 @@ describe('parseSlideDeckPayload', () => {
       id: 'q2',
       type: 'quiz-open',
       question: 'Apa nama keluarga Ada?',
+      countdown: 30,
       answers: ['Lovelace'],
     });
 
@@ -126,6 +133,7 @@ describe('parseSlideDeckPayload', () => {
       id: 'q3-fallback',
       type: 'quiz-open',
       question: 'Fallback slide title',
+      countdown: null,
       answers: [],
     });
   });
@@ -190,12 +198,14 @@ describe('parseSlideDeckPayload', () => {
         id: 'lq1',
         type: 'quiz-open',
         question: 'Capital of France?',
+        countdown: null,
         answers: ['Paris'],
       },
       {
         id: 'lq2',
         type: 'quiz-choice',
         question: 'Pick prime',
+        countdown: null,
         options: [
           { title: '4', isCorrect: false },
           { title: '5', isCorrect: true },
@@ -259,5 +269,32 @@ describe('prompt copy formatters', () => {
       ],
     });
     assert.match(deckText, /^Quiz: Kuis Sejarah\n\n1\. Alat hitung kuno\?\nA\. Sempoa\n\n2\. Nama keluarga Ada\?/);
+
+    const md = formatDeckMarkdown({
+      deckTitle: 'Kuis Sejarah',
+      participationCode: '48139482',
+      totalSlides: 2,
+      questions: [
+        {
+          id: 'q1',
+          type: 'quiz-choice',
+          question: 'Alat hitung kuno?',
+          countdown: 30,
+          options: [{ title: 'Sempoa', isCorrect: false }],
+          hasCorrectAnswer: false,
+        },
+        {
+          id: 'q2',
+          type: 'quiz-open',
+          question: 'Nama keluarga Ada?',
+          countdown: 30,
+          answers: ['Lovelace'],
+        },
+      ],
+    });
+    assert.match(md, /^# Kuis Sejarah/);
+    assert.match(md, /Room Code: `48139482`/);
+    assert.match(md, /- A\. Sempoa/);
+    assert.match(md, /- Answer: `Lovelace`/);
   });
 });

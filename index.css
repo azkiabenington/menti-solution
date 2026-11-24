@@ -321,6 +321,43 @@ summary:focus-visible {
     color: var(--text-muted);
 }
 
+.deck-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.question-search {
+    margin-bottom: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.question-search label {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.question-search input[type="search"] {
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    font-size: 0.95rem;
+    background-color: var(--bg-subtle);
+    color: var(--text-primary);
+}
+
+.search-meta {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    min-height: 1.2em;
+}
+
 .card-actions {
     margin-top: 10px;
     display: flex;
@@ -340,10 +377,30 @@ summary:focus-visible {
     margin-bottom: 0;
 }
 
+.question-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px 12px;
+    margin-bottom: 10px;
+}
+
 .question-card h3 {
-    margin: 0 0 10px 0;
+    margin: 0;
     font-size: 1.05rem;
     color: var(--accent-text);
+}
+
+.countdown-badge {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 999px;
+    padding: 2px 10px;
+    white-space: nowrap;
 }
 
 .answer-row {
@@ -369,7 +426,8 @@ summary:focus-visible {
 
 .choice-list {
     margin: 8px 0 0 0;
-    padding-left: 20px;
+    padding-left: 0;
+    list-style: none;
     display: flex;
     flex-direction: column;
     gap: 6px;
