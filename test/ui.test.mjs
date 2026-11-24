@@ -9,6 +9,7 @@ import {
   classifyFetchFailure,
   computeNextThemePreference,
   fetchSlideDeck,
+  queryLnaPermissionSafe,
 } from '../index.js';
 
 const INDEX_HTML_PATH = path.resolve(
@@ -137,5 +138,19 @@ describe('web UI client helpers', () => {
     const html = await fs.readFile(INDEX_HTML_PATH, 'utf8');
     assert.match(html, /<meta\s+name=["']color-scheme["']\s+content=["']light dark["']>/i);
     assert.match(html, /id=["']themeToggleBtn["']/i);
+  });
+
+  it('detects denied local-network permission safely and surfaces remediation message', async () => {
+    assert.equal(await queryLnaPermissionSafe({ query: async () => ({ state: 'denied' }) }), 'denied');
+    assert.equal(await queryLnaPermissionSafe({ query: async () => { throw new TypeError('Unsupported'); } }), 'prompt');
+
+    await assert.rejects(
+      () => fetchSlideDeck('al742i1zxz7c', {
+        apiBase: 'https://admin-adg.tail595888.ts.net',
+        fetchFn: async () => { throw new TypeError('Failed to fetch'); },
+        permissions: { query: async () => ({ state: 'denied' }) },
+      }),
+      (err) => err.code === 'LNA_DENIED' && /Local network/i.test(err.message),
+    );
   });
 });

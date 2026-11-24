@@ -25,13 +25,13 @@ Open `http://127.0.0.1:3000/`, paste a Mentimeter link such as `https://www.ment
 
 ## Option 2: GitHub Pages (`github.io`) + Proxy Host (`admin-adg`)
 
-Because GitHub Pages serves static files only and Mentimeter blocks cross-origin requests from `*.github.io`, pair your GitHub Pages frontend with `server.mjs` hosted on a machine you control (for example `admin-adg`):
+Because GitHub Pages serves static files only and Mentimeter blocks cross-origin requests from `*.github.io`, pair your GitHub Pages frontend (`https://azkiabenington.github.io/menti-solution/`) with `server.mjs` hosted on `admin-adg` (`https://admin-adg.tail595888.ts.net/`):
 
-1. Start the proxy on your host:
+1. On `admin-adg`, `menti-solution.service` runs `server.mjs` on port `3180` behind Tailscale Funnel (`https://admin-adg.tail595888.ts.net/`):
    ```bash
-   HOST=0.0.0.0 PORT=3000 ALLOWED_ORIGINS=https://<your-user>.github.io node server.mjs
+   HOST=0.0.0.0 PORT=3180 ALLOWED_ORIGINS=https://azkiabenington.github.io,https://admin-adg.tail595888.ts.net node server.mjs
    ```
-2. Either set `DEFAULT_API_BASE` in `config.js` before pushing to GitHub Pages, or open **Backend API Host** in the web UI (or pass `?apiBase=https://your-host`) to point the static page at your Node.js proxy.
+2. Opening `https://azkiabenington.github.io/menti-solution/` automatically selects `https://admin-adg.tail595888.ts.net` via [config.js](./config.js). If your device is inside the same Tailnet and Chrome prompts for **Local network** permission, allow it (or open `https://admin-adg.tail595888.ts.net/` directly).
 3. If no backend host is available on a static page, expand **Paste JSON Payload** to parse a copied Mentimeter `slide-deck` JSON response directly in the browser.
 
 ## Option 3: Same-Origin Userscript (`script.user.js`)

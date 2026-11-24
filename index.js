@@ -66,9 +66,20 @@ function createCodedError(code, message) {
   return error;
 }
 
+// Never queries legacy 'local-network-access' which can crash older Chromium renderers.
+export async function queryLnaPermissionSafe(permissions = globalThis.navigator?.permissions) {
+  if (!permissions?.query) return 'prompt';
+  try {
+    const status = await permissions.query({ name: 'local-network' });
+    return status?.state || 'prompt';
+  } catch {
+    return 'prompt';
+  }
+}
+
 export async function fetchSlideDeck(
   sessionId,
-  { apiBase = '', fetchFn = globalThis.fetch } = {},
+  { apiBase = '', fetchFn = globalThis.fetch, permissions = globalThis.navigator?.permissions } = {},
 ) {
   const url = buildSlideDeckUrl(sessionId, apiBase);
   let response;
@@ -82,6 +93,13 @@ export async function fetchSlideDeck(
       throw createCodedError(
         'STATIC_CORS_HINT',
         'No backend proxy responded at /api/slide-deck. Start server.mjs, configure Backend API Host, or use Paste JSON.',
+      );
+    }
+    const lnaState = await queryLnaPermissionSafe(permissions);
+    if (lnaState === 'denied') {
+      throw createCodedError(
+        'LNA_DENIED',
+        `Browser blocked Local network access to ${apiBase}. Allow "Local network" in site settings for this page, open ${apiBase} directly, or use Paste JSON.`,
       );
     }
     throw createCodedError(
