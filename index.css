@@ -466,14 +466,14 @@ progress.loading-spinner[hidden] {
     gap: 6px;
 }
 
-.choice-item-correct {
+.choice-item-correct,
+.choice-item-ai {
     color: var(--success-text);
     font-weight: 700;
 }
 
-.choice-item-ai {
-    color: var(--accent-text);
-    font-weight: 700;
+.card-extra[hidden] {
+    display: none;
 }
 
 .ai-answer-box {

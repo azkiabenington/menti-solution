@@ -479,6 +479,7 @@ function initializeApp() {
     let currentDeck = parsed;
     let activeQuery = '';
     let solving = false;
+    let showCardDetails = false;
     const pendingIds = new Set();
     const errorById = new Map();
 
@@ -633,7 +634,22 @@ function initializeApp() {
         showToast('Exported JSON');
       });
 
-      deckActions.append(solveAiBtn, aiProgress, copyAllBtn, exportMdBtn, exportJsonBtn);
+      const toggleDetailsBtn = document.createElement('button');
+      toggleDetailsBtn.type = 'button';
+      toggleDetailsBtn.id = 'toggleDetailsBtn';
+      toggleDetailsBtn.className = 'copy-button secondary-btn';
+      toggleDetailsBtn.textContent = 'Details';
+      toggleDetailsBtn.setAttribute('aria-expanded', 'false');
+      toggleDetailsBtn.addEventListener('click', () => {
+        showCardDetails = !showCardDetails;
+        toggleDetailsBtn.textContent = showCardDetails ? 'Hide Details' : 'Details';
+        toggleDetailsBtn.setAttribute('aria-expanded', String(showCardDetails));
+        cardsContainer.querySelectorAll('.card-extra').forEach((el) => {
+          el.hidden = !showCardDetails;
+        });
+      });
+
+      deckActions.append(solveAiBtn, aiProgress, copyAllBtn, exportMdBtn, exportJsonBtn, toggleDetailsBtn);
       summary.append(deckActions);
     }
 
@@ -762,7 +778,23 @@ function initializeApp() {
         if (item.type === 'quiz-open') {
           if (item.answers.length === 0) {
             if (item.aiSolution) {
-              card.append(createAiAnswerBox(item.aiSolution));
+              const row = document.createElement('div');
+              row.className = 'answer-row';
+              const label = document.createElement('span');
+              label.className = 'answer-text';
+              label.textContent = `Answer: ${item.aiSolution.answer}`;
+              row.append(label);
+              card.append(row);
+
+              const extra = document.createElement('div');
+              extra.className = 'card-extra';
+              extra.hidden = !showCardDetails;
+              extra.append(createAiAnswerBox(item.aiSolution));
+              const openActions = document.createElement('div');
+              openActions.className = 'card-actions';
+              openActions.append(createAskOneButton(item, index));
+              extra.append(openActions);
+              card.append(extra);
             } else if (pendingIds.has(item.id)) {
               const note = document.createElement('p');
               note.className = 'question-note question-note-pending';
@@ -773,16 +805,20 @@ function initializeApp() {
               errNote.className = 'question-note question-note-error';
               errNote.textContent = `AGY gagal menjawab: ${errorById.get(item.id)}`;
               card.append(errNote);
+              const extra = document.createElement('div');
+              extra.className = 'card-extra';
+              extra.hidden = !showCardDetails;
+              const openActions = document.createElement('div');
+              openActions.className = 'card-actions';
+              openActions.append(createAskOneButton(item, index));
+              extra.append(openActions);
+              card.append(extra);
             } else {
               const note = document.createElement('p');
               note.className = 'question-note';
               note.textContent = 'No accepted short answer was returned for this slide.';
               card.append(note);
             }
-            const openActions = document.createElement('div');
-            openActions.className = 'card-actions';
-            openActions.append(createAskOneButton(item, index));
-            card.append(openActions);
           } else {
             item.answers.forEach((answerText) => {
               const row = document.createElement('div');
@@ -829,9 +865,7 @@ function initializeApp() {
             card.append(list);
           }
 
-          if (item.aiSolution) {
-            card.append(createAiAnswerBox(item.aiSolution));
-          } else if (pendingIds.has(item.id)) {
+          if (pendingIds.has(item.id)) {
             const pendingNote = document.createElement('p');
             pendingNote.className = 'question-note question-note-pending';
             pendingNote.textContent = 'AGY (gemini-4-hydrogen-medium) sedang mencari jawaban...';
@@ -841,12 +875,25 @@ function initializeApp() {
             errNote.className = 'question-note question-note-error';
             errNote.textContent = `AGY gagal menjawab: ${errorById.get(item.id)}`;
             card.append(errNote);
-          } else if (!item.hasCorrectAnswer) {
+          } else if (item.aiSolution && item.aiSolution.choiceIndex === null) {
+            const fallbackAns = document.createElement('p');
+            fallbackAns.className = 'answer-text';
+            fallbackAns.textContent = `Answer: ${item.aiSolution.answer}`;
+            card.append(fallbackAns);
+          }
+
+          const extra = document.createElement('div');
+          extra.className = 'card-extra';
+          extra.hidden = !showCardDetails;
+
+          if (item.aiSolution) {
+            extra.append(createAiAnswerBox(item.aiSolution));
+          } else if (!item.hasCorrectAnswer && !pendingIds.has(item.id) && !errorById.has(item.id)) {
             const note = document.createElement('p');
             note.className = 'question-note';
             note.textContent =
               'Correct answer is not exposed in Mentimeter public API for multiple-choice slides.';
-            card.append(note);
+            extra.append(note);
           }
 
           const actionsRow = document.createElement('div');
@@ -881,7 +928,8 @@ function initializeApp() {
             showToast(copied ? 'Copied question' : 'Copy failed');
           });
           actionsRow.append(copyQuestionBtn);
-          card.append(actionsRow);
+          extra.append(actionsRow);
+          card.append(extra);
         }
 
         cardsContainer.append(card);
