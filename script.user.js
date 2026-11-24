@@ -1,16 +1,16 @@
 // ==UserScript==
 // @name        Mentimeter Quiz Solution Userscript
-// @namespace   https://github.com/an0n-00/mentimeter-quiz-solutions
+// @namespace   https://github.com/azkiabenington/menti-solution
 // @match       https://www.menti.com/*
 // @grant       none
 // @version     2.0
 // @author      An0n-00
 // @description Inspect public Mentimeter slide-deck questions and short-answer solutions directly on menti.com
 // @license     CC BY-NC-SA 4.0
-// @updateURL   https://an0n-00.github.io/mentimeter-quiz-solutions/script.user.js
-// @downloadURL https://an0n-00.github.io/mentimeter-quiz-solutions/script.user.js
-// @supportURL  https://github.com/An0n-00/mentimeter-quiz-solutions/issues
-// @icon        https://an0n-00.github.io/mentimeter-quiz-solutions/pics/github-mark-white.svg
+// @updateURL   https://azkiabenington.github.io/menti-solution/script.user.js
+// @downloadURL https://azkiabenington.github.io/menti-solution/script.user.js
+// @supportURL  https://github.com/azkiabenington/menti-solution/issues
+// @icon        https://azkiabenington.github.io/menti-solution/pics/github-mark-white.svg
 // ==/UserScript==
 
 (() => {
