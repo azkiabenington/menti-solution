@@ -89,5 +89,17 @@
         <p>Proof of concept</p>
         <p>For educational purposes only.</p>
     </footer>
+    <script>
+        if (window.location.protocol === 'file:') {
+            var solutionEl = document.getElementById('solution');
+            if (solutionEl) {
+                solutionEl.className = 'error';
+                var msg = document.createElement('p');
+                msg.className = 'state-message';
+                msg.textContent = 'Direct file:// opening blocks ES modules in browsers. Run "npm start" (http://127.0.0.1:3000/), open the hosted GitHub Pages URL, or install the Tampermonkey userscript (script.user.js).';
+                solutionEl.replaceChildren(msg);
+            }
+        }
+    </script>
 </body>
 </html>

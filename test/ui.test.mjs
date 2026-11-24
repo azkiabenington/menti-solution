@@ -1,10 +1,20 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import vm from 'node:vm';
+import { fileURLToPath } from 'node:url';
 import {
   buildSlideDeckUrl,
   classifyFetchFailure,
   fetchSlideDeck,
 } from '../index.js';
+
+const INDEX_HTML_PATH = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'index.html',
+);
 
 describe('web UI client helpers', () => {
   it('builds /api/slide-deck URLs for same-origin and configured API base', () => {
@@ -93,5 +103,25 @@ describe('web UI client helpers', () => {
       }),
       (err) => err.code === 'INVALID_RESPONSE',
     );
+  });
+
+  it('includes a classic script fallback in index.html that explains file:// module blocking', async () => {
+    const html = await fs.readFile(INDEX_HTML_PATH, 'utf8');
+    const matches = [...html.matchAll(/<script(?:\s+[^>]*)?>([\s\S]*?)<\/script>/gi)];
+    const inlineClassic = matches.find((m) => !/type=["']module["']/i.test(m[0]) && m[1].trim().length > 0);
+    assert.ok(inlineClassic, 'Expected an inline classic <script> fallback for file:// protocol');
+
+    const solutionNode = { className: 'empty', textContent: '', replaceChildren(node) { this.textContent = node?.textContent ?? ''; } };
+    const pNode = { className: '', textContent: '' };
+    const ctx = {
+      window: { location: { protocol: 'file:' } },
+      document: {
+        getElementById: (id) => (id === 'solution' ? solutionNode : null),
+        createElement: () => pNode,
+      },
+    };
+    vm.runInNewContext(inlineClassic[1], ctx);
+    assert.equal(solutionNode.className, 'error');
+    assert.match(solutionNode.textContent, /npm start|localhost|github\.io|userscript/i);
   });
 });

@@ -234,4 +234,60 @@ describe('script.user.js', () => {
     assert.match(renderedText, /Lovelace/);
     assert.match(renderedText, /Sempoa/);
   });
+
+  it('ignores non-quiz 404 routes and clears stale panel on SPA navigation to root', async () => {
+    const source = await fs.readFile(SCRIPT_PATH, 'utf8');
+
+    const nonQuizDom = createMockDom('https://www.menti.com/features');
+    vm.runInNewContext(source, {
+      window: nonQuizDom.windowObj,
+      document: nonQuizDom.document,
+      history: nonQuizDom.history,
+      location: nonQuizDom.location,
+      fetch: async () => ({ ok: false, status: 404, async json() { return {}; } }),
+      navigator: { clipboard: { writeText: async () => {} } },
+      URL,
+      setTimeout,
+      clearTimeout,
+      console,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.equal(nonQuizDom.body.querySelector('#menti-solutions-panel'), null);
+
+    const spaDom = createMockDom('https://www.menti.com/al742i1zxz7c');
+    vm.runInNewContext(source, {
+      window: spaDom.windowObj,
+      document: spaDom.document,
+      history: spaDom.history,
+      location: spaDom.location,
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            slide_deck: {
+              name: 'Quiz A',
+              slides: [
+                {
+                  slide_public_key: 'q1',
+                  static_content: { type: 'quiz-open' },
+                  interactive_contents: [{ title: 'Q1', choices: [{ title: 'Lovelace' }] }],
+                },
+              ],
+            },
+          };
+        },
+      }),
+      navigator: { clipboard: { writeText: async () => {} } },
+      URL,
+      setTimeout,
+      clearTimeout,
+      console,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.match(spaDom.body.textContent, /Lovelace/);
+
+    spaDom.history.pushState({}, '', '/');
+    assert.equal(spaDom.body.querySelector('#menti-solutions-panel'), null);
+  });
 });

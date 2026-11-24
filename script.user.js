@@ -150,7 +150,7 @@
       bodyEl.hidden = collapsed;
       toggleBtn.textContent = collapsed ? 'Show' : 'Hide';
     }, true);
-    const closeBtn = makeButton('Close', () => panel.remove(), true);
+    const closeBtn = makeButton('Close', () => clearPanel(), true);
 
     controls.append(refreshBtn, toggleBtn, closeBtn);
     header.append(title, controls);
@@ -172,6 +172,15 @@
     panel.append(header, statusEl, bodyEl);
     document.body.appendChild(panel);
     return panel;
+  }
+
+  function clearPanel() {
+    document.getElementById(PANEL_ID)?.remove();
+    currentSessionId = null;
+    collapsed = false;
+    bodyEl = null;
+    statusEl = null;
+    toggleBtn = null;
   }
 
   function renderResults(parsed) {
@@ -258,12 +267,19 @@
 
   async function loadSession(force = false) {
     const sessionId = extractSessionId(window.location.href);
-    if (!sessionId) return;
+    if (!sessionId) {
+      clearPanel();
+      return;
+    }
     if (!force && sessionId === currentSessionId) return;
     currentSessionId = sessionId;
 
-    ensurePanel();
-    statusEl.textContent = `Loading slide deck ${sessionId}...`;
+    const existingPanel = document.getElementById(PANEL_ID);
+    if (existingPanel || force) {
+      ensurePanel();
+      statusEl.textContent = `Loading slide deck ${sessionId}...`;
+      bodyEl.replaceChildren();
+    }
 
     try {
       const response = await fetch(
@@ -275,16 +291,30 @@
         },
       );
 
+      if (currentSessionId !== sessionId) return;
+
       if (!response.ok) {
+        if (response.status === 404 && !force) {
+          clearPanel();
+          return;
+        }
+        ensurePanel();
         statusEl.textContent = `Could not load quiz (HTTP ${response.status}).`;
+        bodyEl.replaceChildren();
         return;
       }
 
       const data = await response.json();
+      if (currentSessionId !== sessionId) return;
       const parsed = parseSlideDeck(data);
       renderResults(parsed);
     } catch (error) {
-      statusEl.textContent = error?.message || 'Failed to load slide deck.';
+      if (currentSessionId !== sessionId) return;
+      if (document.getElementById(PANEL_ID) || force) {
+        ensurePanel();
+        statusEl.textContent = error?.message || 'Failed to load slide deck.';
+        bodyEl.replaceChildren();
+      }
     }
   }
 

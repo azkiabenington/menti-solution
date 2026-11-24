@@ -175,4 +175,24 @@ describe('server endpoints', () => {
     assert.equal(toRes.status, 504);
     assert.equal((await toRes.json()).error, 'UPSTREAM_TIMEOUT');
   });
+
+  it('returns 400 BAD_REQUEST on malformed request URL instead of throwing', async () => {
+    const handler = createServerHandler({ rootDir: REPO_ROOT });
+    let statusCode = 0;
+    let body = '';
+    const mockRes = {
+      headersSent: false,
+      writeHead(code) {
+        statusCode = code;
+        this.headersSent = true;
+      },
+      end(chunk) {
+        body = String(chunk || '');
+      },
+    };
+
+    await handler({ method: 'GET', url: '//', headers: {} }, mockRes);
+    assert.equal(statusCode, 400);
+    assert.equal(JSON.parse(body).error, 'BAD_REQUEST');
+  });
 });

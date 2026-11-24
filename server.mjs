@@ -70,139 +70,153 @@ export function createServerHandler({
 
   return async function handleRequest(req, res) {
     const method = (req.method || 'GET').toUpperCase();
-    const requestUrl = new URL(req.url || '/', 'http://127.0.0.1');
-    const pathname = requestUrl.pathname;
-    const corsHeaders = buildCorsHeaders(req.headers.origin, allowedOriginPolicy);
+    const corsHeaders = buildCorsHeaders(req.headers?.origin, allowedOriginPolicy);
 
-    if (pathname === '/health' && method === 'GET') {
-      sendJson(res, 200, { ok: true }, corsHeaders);
-      return;
-    }
-
-    if (pathname === '/api/slide-deck') {
-      if (method === 'OPTIONS') {
-        res.writeHead(204, corsHeaders);
-        res.end();
-        return;
-      }
-
-      if (method !== 'GET') {
-        sendJson(res, 405, { error: 'METHOD_NOT_ALLOWED', message: 'Use GET.' }, corsHeaders);
-        return;
-      }
-
-      const rawSessionId = requestUrl.searchParams.get('sessionId') || '';
-      if (!isValidSessionId(rawSessionId)) {
-        sendJson(
-          res,
-          400,
-          { error: 'INVALID_SESSION_ID', message: 'Invalid or missing Mentimeter session ID.' },
-          corsHeaders,
-        );
-        return;
-      }
-
-      const sessionId = rawSessionId.trim();
-      const upstreamUrl = `https://api.mentimeter.com/audience/slide-deck/${encodeURIComponent(sessionId)}`;
-
-      try {
-        const upstreamRes = await fetchFn(upstreamUrl, {
-          headers: { accept: 'application/json' },
-          signal: AbortSignal.timeout(timeoutMs),
-        });
-
-        if (upstreamRes.status === 404) {
-          sendJson(
-            res,
-            404,
-            { error: 'QUIZ_NOT_FOUND', message: 'Mentimeter quiz was not found or is inactive.' },
-            corsHeaders,
-          );
-          return;
-        }
-
-        if (!upstreamRes.ok) {
-          sendJson(
-            res,
-            502,
-            {
-              error: 'UPSTREAM_ERROR',
-              message: `Mentimeter API returned HTTP ${upstreamRes.status}.`,
-            },
-            corsHeaders,
-          );
-          return;
-        }
-
-        const rawBody = await upstreamRes.text();
-        let parsedBody;
-        try {
-          parsedBody = JSON.parse(rawBody);
-        } catch {
-          sendJson(
-            res,
-            502,
-            { error: 'UPSTREAM_ERROR', message: 'Mentimeter API returned invalid JSON.' },
-            corsHeaders,
-          );
-          return;
-        }
-
-        if (!parsedBody || typeof parsedBody !== 'object') {
-          sendJson(
-            res,
-            502,
-            { error: 'UPSTREAM_ERROR', message: 'Unexpected payload shape from Mentimeter API.' },
-            corsHeaders,
-          );
-          return;
-        }
-
-        sendJson(res, 200, parsedBody, corsHeaders);
-      } catch (error) {
-        if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
-          sendJson(
-            res,
-            504,
-            { error: 'UPSTREAM_TIMEOUT', message: 'Mentimeter API timed out.' },
-            corsHeaders,
-          );
-          return;
-        }
-
-        sendJson(
-          res,
-          502,
-          { error: 'UPSTREAM_ERROR', message: 'Failed to contact Mentimeter API.' },
-          corsHeaders,
-        );
-      }
-      return;
-    }
-
-    if (method !== 'GET' && method !== 'HEAD') {
-      sendJson(res, 405, { error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
-      return;
-    }
-
-    const staticAsset = STATIC_ALLOWLIST.get(pathname);
-    if (!staticAsset) {
-      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end('Not Found');
+    let requestUrl;
+    try {
+      requestUrl = new URL(req.url || '/', 'http://127.0.0.1');
+    } catch {
+      sendJson(res, 400, { error: 'BAD_REQUEST', message: 'Malformed request URL.' }, corsHeaders);
       return;
     }
 
     try {
-      const targetPath = path.resolve(rootDir, staticAsset.file);
-      const data = await fs.readFile(targetPath);
-      res.writeHead(200, {
-        'Content-Type': staticAsset.type,
-        'Cache-Control': 'no-cache',
-      });
-      res.end(method === 'HEAD' ? undefined : data);
+      const pathname = requestUrl.pathname;
+
+      if (pathname === '/health' && method === 'GET') {
+        sendJson(res, 200, { ok: true }, corsHeaders);
+        return;
+      }
+
+      if (pathname === '/api/slide-deck') {
+        if (method === 'OPTIONS') {
+          res.writeHead(204, corsHeaders);
+          res.end();
+          return;
+        }
+
+        if (method !== 'GET') {
+          sendJson(res, 405, { error: 'METHOD_NOT_ALLOWED', message: 'Use GET.' }, corsHeaders);
+          return;
+        }
+
+        const rawSessionId = requestUrl.searchParams.get('sessionId') || '';
+        if (!isValidSessionId(rawSessionId)) {
+          sendJson(
+            res,
+            400,
+            { error: 'INVALID_SESSION_ID', message: 'Invalid or missing Mentimeter session ID.' },
+            corsHeaders,
+          );
+          return;
+        }
+
+        const sessionId = rawSessionId.trim();
+        const upstreamUrl = `https://api.mentimeter.com/audience/slide-deck/${encodeURIComponent(sessionId)}`;
+
+        try {
+          const upstreamRes = await fetchFn(upstreamUrl, {
+            headers: { accept: 'application/json' },
+            signal: AbortSignal.timeout(timeoutMs),
+          });
+
+          if (upstreamRes.status === 404) {
+            sendJson(
+              res,
+              404,
+              { error: 'QUIZ_NOT_FOUND', message: 'Mentimeter quiz was not found or is inactive.' },
+              corsHeaders,
+            );
+            return;
+          }
+
+          if (!upstreamRes.ok) {
+            sendJson(
+              res,
+              502,
+              {
+                error: 'UPSTREAM_ERROR',
+                message: `Mentimeter API returned HTTP ${upstreamRes.status}.`,
+              },
+              corsHeaders,
+            );
+            return;
+          }
+
+          const rawBody = await upstreamRes.text();
+          let parsedBody;
+          try {
+            parsedBody = JSON.parse(rawBody);
+          } catch {
+            sendJson(
+              res,
+              502,
+              { error: 'UPSTREAM_ERROR', message: 'Mentimeter API returned invalid JSON.' },
+              corsHeaders,
+            );
+            return;
+          }
+
+          if (!parsedBody || typeof parsedBody !== 'object') {
+            sendJson(
+              res,
+              502,
+              { error: 'UPSTREAM_ERROR', message: 'Unexpected payload shape from Mentimeter API.' },
+              corsHeaders,
+            );
+            return;
+          }
+
+          sendJson(res, 200, parsedBody, corsHeaders);
+        } catch (error) {
+          if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+            sendJson(
+              res,
+              504,
+              { error: 'UPSTREAM_TIMEOUT', message: 'Mentimeter API timed out.' },
+              corsHeaders,
+            );
+            return;
+          }
+
+          sendJson(
+            res,
+            502,
+            { error: 'UPSTREAM_ERROR', message: 'Failed to contact Mentimeter API.' },
+            corsHeaders,
+          );
+        }
+        return;
+      }
+
+      if (method !== 'GET' && method !== 'HEAD') {
+        sendJson(res, 405, { error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
+        return;
+      }
+
+      const staticAsset = STATIC_ALLOWLIST.get(pathname);
+      if (!staticAsset) {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Not Found');
+        return;
+      }
+
+      try {
+        const targetPath = path.resolve(rootDir, staticAsset.file);
+        const data = await fs.readFile(targetPath);
+        res.writeHead(200, {
+          'Content-Type': staticAsset.type,
+          'Cache-Control': 'no-cache',
+        });
+        res.end(method === 'HEAD' ? undefined : data);
+      } catch {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Not Found');
+      }
     } catch {
-      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end('Not Found');
+      if (!res.headersSent) {
+        sendJson(res, 500, { error: 'INTERNAL_ERROR', message: 'Internal server error.' }, corsHeaders);
+      }
     }
   };
 }
