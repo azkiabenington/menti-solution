@@ -485,7 +485,7 @@ describe('script.user.js', () => {
             status: 200,
             async json() {
               return {
-                model: 'gemini-3.8-flash-high',
+                model: 'gemini-4-hydrogen-medium',
                 solutions: [
                   { id: 'q1', choiceIndex: 0, answer: 'Sempoa', reason: 'Menggunakan manik-manik.' },
                 ],

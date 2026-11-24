@@ -185,7 +185,7 @@ export async function fetchSlideDeck(
   return parseSlideDeckPayload(parsedJson);
 }
 
-export function mergeAiSolutions(questions, solutions = [], model = 'gemini-3.8-flash-high') {
+export function mergeAiSolutions(questions, solutions = [], model = 'gemini-4-hydrogen-medium') {
   if (!Array.isArray(questions)) return [];
   const byId = new Map(
     (Array.isArray(solutions) ? solutions : []).map((sol) => [sol?.id, sol]),
@@ -525,7 +525,7 @@ function initializeApp() {
 
       const batches = progressive ? buildSolveBatches(targetQuestions) : [targetQuestions];
       let solvedCount = 0;
-      let lastModel = 'gemini-3.8-flash-high';
+      let lastModel = 'gemini-4-hydrogen-medium';
       let lastErrorMessage = '';
 
       try {
@@ -766,7 +766,7 @@ function initializeApp() {
             } else if (pendingIds.has(item.id)) {
               const note = document.createElement('p');
               note.className = 'question-note question-note-pending';
-              note.textContent = 'AGY (gemini-3.8-flash-high) sedang mencari jawaban...';
+              note.textContent = 'AGY (gemini-4-hydrogen-medium) sedang mencari jawaban...';
               card.append(note);
             } else if (errorById.has(item.id)) {
               const errNote = document.createElement('p');
@@ -834,7 +834,7 @@ function initializeApp() {
           } else if (pendingIds.has(item.id)) {
             const pendingNote = document.createElement('p');
             pendingNote.className = 'question-note question-note-pending';
-            pendingNote.textContent = 'AGY (gemini-3.8-flash-high) sedang mencari jawaban...';
+            pendingNote.textContent = 'AGY (gemini-4-hydrogen-medium) sedang mencari jawaban...';
             card.append(pendingNote);
           } else if (errorById.has(item.id)) {
             const errNote = document.createElement('p');

@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import {
   AGY_EFFORT,
   AGY_MODEL,
+  DEFAULT_AGY_BIN,
   DEFAULT_SOLVE_TIMEOUT_MS,
   buildSolvePrompt,
   parseAgySolverOutput,
@@ -12,9 +13,10 @@ import {
 } from '../solver.mjs';
 
 describe('AGY solver helpers', () => {
-  it('locks model configuration to gemini-3.8-flash-high with high effort and 120s timeout', () => {
-    assert.equal(AGY_MODEL, 'gemini-3.8-flash-high');
-    assert.equal(AGY_EFFORT, 'high');
+  it('locks model configuration to gemini-4-hydrogen-medium on agy-akun2 with medium effort and 120s timeout', () => {
+    assert.equal(AGY_MODEL, 'gemini-4-hydrogen-medium');
+    assert.equal(AGY_EFFORT, 'medium');
+    assert.equal(DEFAULT_AGY_BIN, '/home/admin-adg/.local/bin/agy-akun2');
     assert.equal(DEFAULT_SOLVE_TIMEOUT_MS, 120000);
   });
 
@@ -86,7 +88,7 @@ describe('AGY solver helpers', () => {
     );
   });
 
-  it('invokes agy CLI with sandbox, high effort, date context, failover, and cleans temp dir', async () => {
+  it('invokes agy CLI with sandbox, medium effort, date context, failover, and cleans temp dir', async () => {
     let capturedBin = '';
     let capturedArgs = [];
     let capturedOpts = null;
@@ -119,14 +121,14 @@ describe('AGY solver helpers', () => {
 
     assert.equal(capturedBin, '/custom/bin/agy');
     assert.ok(capturedArgs.includes('--model'));
-    assert.equal(capturedArgs[capturedArgs.indexOf('--model') + 1], 'gemini-3.8-flash-high');
-    assert.equal(capturedArgs[capturedArgs.indexOf('--effort') + 1], 'high');
+    assert.equal(capturedArgs[capturedArgs.indexOf('--model') + 1], 'gemini-4-hydrogen-medium');
+    assert.equal(capturedArgs[capturedArgs.indexOf('--effort') + 1], 'medium');
     assert.ok(capturedArgs.includes('--disable-slash-commands'));
     assert.ok(capturedArgs.includes('--sandbox'));
     assert.equal(capturedArgs[capturedArgs.indexOf('--output-format') + 1], 'json');
     assert.equal(capturedOpts.env.DBUS_SESSION_BUS_ADDRESS, undefined);
-    assert.equal(result.model, 'gemini-3.8-flash-high');
-    assert.equal(result.effort, 'high');
+    assert.equal(result.model, 'gemini-4-hydrogen-medium');
+    assert.equal(result.effort, 'medium');
     assert.equal(result.solutions[0].answer, 'Sempoa');
 
     await assert.rejects(() => fs.stat(capturedOpts.cwd));

@@ -6,9 +6,9 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
-export const AGY_MODEL = 'gemini-3.8-flash-high';
-export const AGY_EFFORT = 'high';
-export const DEFAULT_AGY_BIN = process.env.AGY_BIN || '/home/admin-adg/.local/bin/agy';
+export const AGY_MODEL = 'gemini-4-hydrogen-medium';
+export const AGY_EFFORT = 'medium';
+export const DEFAULT_AGY_BIN = process.env.AGY_BIN || '/home/admin-adg/.local/bin/agy-akun2';
 export const DEFAULT_AGY_BINS = process.env.AGY_BINS
   ? process.env.AGY_BINS.split(',').map((entry) => entry.trim()).filter(Boolean)
   : process.env.AGY_BIN
@@ -19,6 +19,23 @@ export const DEFAULT_AGY_BINS = process.env.AGY_BINS
         '/home/admin-adg/.local/bin/agy',
       ];
 export const DEFAULT_SOLVE_TIMEOUT_MS = 120000;
+
+function resolveSolverTargets({ agyBin, agyBins } = {}) {
+  if (Array.isArray(agyBins) && agyBins.length > 0) {
+    return agyBins.map((bin) => ({ bin, model: AGY_MODEL, effort: AGY_EFFORT }));
+  }
+  if (agyBin) {
+    return [{ bin: agyBin, model: AGY_MODEL, effort: AGY_EFFORT }];
+  }
+  if (process.env.AGY_BINS || process.env.AGY_BIN) {
+    return DEFAULT_AGY_BINS.map((bin) => ({ bin, model: AGY_MODEL, effort: AGY_EFFORT }));
+  }
+  return [
+    { bin: '/home/admin-adg/.local/bin/agy-akun2', model: 'gemini-4-hydrogen-medium', effort: 'medium' },
+    { bin: '/home/admin-adg/.local/bin/agy-akun3', model: 'gemini-3.8-flash-high', effort: 'high' },
+    { bin: '/home/admin-adg/.local/bin/agy', model: 'gemini-3.8-flash-high', effort: 'high' },
+  ];
+}
 
 const MAX_QUESTIONS = 50;
 const MAX_OPTIONS = 12;
@@ -225,37 +242,32 @@ export async function runAgySolver({
   execFileFn = execFileAsync,
 }) {
   const prompt = buildSolvePrompt(questions, context);
-  const candidates =
-    Array.isArray(agyBins) && agyBins.length > 0
-      ? agyBins
-      : agyBin
-        ? [agyBin]
-        : DEFAULT_AGY_BINS;
-
-  const args = [
-    '--model',
-    AGY_MODEL,
-    '--effort',
-    AGY_EFFORT,
-    '--disable-slash-commands',
-    '--sandbox',
-    '--output-format',
-    'json',
-    '-p',
-    prompt,
-  ];
+  const targets = resolveSolverTargets({ agyBin, agyBins });
 
   const startedAt = Date.now();
   let lastError = null;
   let allMissing = true;
 
-  for (const candidateBin of candidates) {
+  for (const target of targets) {
     const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'menti-agy-'));
     const childEnv = { ...process.env };
     delete childEnv.DBUS_SESSION_BUS_ADDRESS;
 
+    const args = [
+      '--model',
+      target.model,
+      '--effort',
+      target.effort,
+      '--disable-slash-commands',
+      '--sandbox',
+      '--output-format',
+      'json',
+      '-p',
+      prompt,
+    ];
+
     try {
-      const { stdout } = await execFileFn(candidateBin, args, {
+      const { stdout } = await execFileFn(target.bin, args, {
         cwd: workDir,
         env: childEnv,
         timeout: timeoutMs,
@@ -265,8 +277,8 @@ export async function runAgySolver({
 
       const solutions = parseAgySolverOutput(stdout, questions);
       return {
-        model: AGY_MODEL,
-        effort: AGY_EFFORT,
+        model: target.model,
+        effort: target.effort,
         durationMs: Date.now() - startedAt,
         solutions,
       };
