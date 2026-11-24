@@ -1,39 +1,49 @@
 # mentimeter-quiz-solutions
 
-[![GitHub issues](https://img.shields.io/github/issues/An0n-00/mentimeter-quiz-solutions?label=Issues&color=red)](https://github.com/An0n-00/mentimeter-quiz-solutions/issues)  [![GitHub stars](https://img.shields.io/github/stars/An0n-00/mentimeter-quiz-solutions?label=Stars&color=yellow)](https://github.com/An0n-00/mentimeter-quiz-solutions/stargazers)   [![GitHub license](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-orange)](https://github.com/An0n-00/mentimeter-quiz-solutions/blob/main/LICENSE.md)  [![GitHub open pull requests](https://img.shields.io/github/issues-pr/An0n-00/mentimeter-quiz-solutions?label=Open%20PRs&color=cyan)](https://github.com/An0n-00/mentimeter-quiz-solutions/pulls)
+[![GitHub issues](https://img.shields.io/github/issues/An0n-00/mentimeter-quiz-solutions?label=Issues&color=red)](https://github.com/An0n-00/mentimeter-quiz-solutions/issues)  [![GitHub stars](https://img.shields.io/github/stars/An0n-00/mentimeter-quiz-solutions?label=Stars&color=yellow)](https://github.com/An0n-00/mentimeter-quiz-solutions/stargazers)   [![GitHub license](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-orange)](https://github.com/An0n-00/mentimeter-quiz-solutions/blob/main/LICENSE)
 
-A website that automatically gets the solutions of your mentimeter quiz. 🎉
+Inspect public Mentimeter `slide_deck` payloads across a local/self-hosted Node.js proxy, static GitHub Pages (`github.io`), and a same-origin browser userscript.
 
-This project is merely a proof of concept and should not be used for any malicious purposes. ⚠️
+This project is a proof of concept for educational inspection only.
 
-## How to use
+## Supported Mentimeter Behavior
 
-1. 📋 Copy the link of the mentimeter quiz you want to get the solutions of.
+Mentimeter migrated from `/series/{id}` to `/audience/slide-deck/{sessionId}` (`data.slide_deck.slides`) and enforces CORS against third-party browser origins (`403 Cross-Origin Request Blocked`):
 
-2. 🌐 Go to the website: [https://an0n-00.github.io/mentimeter-quiz-solutions/](https://an0n-00.github.io/mentimeter-quiz-solutions/) and paste the link in the input field.
+- **Short-answer slides (`quiz-open`)**: accepted answers are returned in `interactive_contents[].choices[].title` and rendered with one-click copy buttons.
+- **Multiple-choice slides (`quiz-choice`)**: Mentimeter no longer exposes `correct_answer` in the public `slide-deck` payload. The UI lists all choices and highlights answers only if a payload explicitly provides `correct_answer: true`.
 
-3. 🖱️ Click on the "Get solutions" button.
+## Option 1: Run Locally with Node.js (Zero Dependencies)
 
-4. ✅ The solutions will be displayed on the screen.
+Requires Node.js 18+ (built-in `node:http` and `fetch`).
 
-## Userscript
+```bash
+npm start
+```
 
-You can also use this project as a userscript. To do this, you need to install a userscript manager like [Tampermonkey](https://www.tampermonkey.net/), [Greasemonkey](https://www.greasespot.net/) or [Violentmonkey](https://violentmonkey.github.io/).
+Open `http://127.0.0.1:3000/`, paste a Mentimeter link such as `https://www.menti.com/al742i1zxz7c`, and click **Get Answers**.
 
-After installing the userscript manager, you can install the userscript by adding the following link to the userscript manager:
+## Option 2: GitHub Pages (`github.io`) + Proxy Host (`admin-adg`)
 
-[Install userscript](https://an0n-00.github.io/mentimeter-quiz-solutions/script.user.js)
+Because GitHub Pages serves static files only and Mentimeter blocks cross-origin requests from `*.github.io`, pair your GitHub Pages frontend with `server.mjs` hosted on a machine you control (for example `admin-adg`):
 
-After installing the userscript, you can go to any mentimeter quiz and click on the userscript icon to get the solutions of the quiz.
+1. Start the proxy on your host:
+   ```bash
+   HOST=0.0.0.0 PORT=3000 ALLOWED_ORIGINS=https://<your-user>.github.io node server.mjs
+   ```
+2. Either set `DEFAULT_API_BASE` in `config.js` before pushing to GitHub Pages, or open **Backend API Host** in the web UI (or pass `?apiBase=https://your-host`) to point the static page at your Node.js proxy.
+3. If no backend host is available on a static page, expand **Paste JSON Payload** to parse a copied Mentimeter `slide-deck` JSON response directly in the browser.
 
-## How it works
+## Option 3: Same-Origin Userscript (`script.user.js`)
 
-I noticed that the mentimeter all the data of the quiz are requested on page load. This means that the solutions are also requested and can be found in the response data. This website simply gets the data of the quiz and extracts the solutions from it. 🕵️‍♂️
+Install `script.user.js` in [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/). When you visit `https://www.menti.com/<session>`, the userscript fetches `/core/audience/slide-deck/<session>` same-origin without needing an external proxy or Node.js host.
 
-## Disclaimer
+## Testing
 
-This project is merely a proof of concept and should not be used for any malicious purposes. I am not responsible for any misuse of this project. 🚫
+```bash
+npm test
+```
 
 ## License
 
-License: mentimeter-quiz-solutions by An0n-00 is [licensed under Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International](./LICENSE). 📜
+Licensed under [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International](./LICENSE).
