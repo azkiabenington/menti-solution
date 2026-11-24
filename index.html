@@ -7,32 +7,82 @@
     <meta name="keywords" content="Mentimeter, Quiz, Solution, Provider">
     <meta name="author" content="Mentimeter Quiz Solution Provider">
     <title>Mentimeter Quiz Solution Provider</title>
-    <script src="./index.js" defer></script>
+    <script type="module" src="./index.js"></script>
     <link rel="stylesheet" href="./index.css">
 </head>
 <body>
     <header>
         <h1>Mentimeter Quiz Solution Provider</h1>
-        <a href="https://github.com/An0n-00/mentimeter-quiz-solutions" target="_blank">
+        <a href="https://github.com/An0n-00/mentimeter-quiz-solutions" target="_blank" rel="noopener noreferrer" aria-label="View source on GitHub">
             <img src="./pics/github-mark.svg" alt="GitHub" width="30" height="30">
         </a>
     </header>
     <main>
-        <div id="dropdown" class="hidden dropdown"></div>
+        <div id="statusToast" class="toast" role="status" aria-live="polite"></div>
 
-        <form action="" id="getAnswersForm">
-            <input type="text" id="mentiLink" placeholder="Enter the menti.com link from your browser. Example: https://www.menti.com/algqxx1dkhrn">
+        <form id="getAnswersForm" class="card-panel" novalidate>
+            <label for="mentiLink" class="field-label">Mentimeter link or session code</label>
+            <input
+                type="text"
+                id="mentiLink"
+                name="mentiLink"
+                placeholder="https://www.menti.com/al742i1zxz7c"
+                autocomplete="url"
+                inputmode="url"
+            >
             <button id="getAnswers" type="submit">Get Answers</button>
-            <input type="text" id="seriesValue" placeholder="Advanced Option: Enter the series value. Example: alx89rjnxk92jkz2e836vda6ie511881">
-            <button id="getAnswersAdvanced" type="button">Get Answers via Series</button>
         </form>
-        
-        <div id="solution"></div>
 
-        <div id="notice">
-            <p>Mentimeter Quiz Solution Provider currently on supports 'Type Answer' questions. There is a user script in Beta that will also support other formats. To hide this message click me.</p>
-            <a href="https://github.com/An0n-00/mentimeter-quiz-solutions">For more information visit the GitHub repository.</a>
-        </div>
+        <section class="tools-stack" aria-label="Additional options">
+            <details id="apiSettingsPanel" class="details-panel">
+                <summary>Backend API Host (for GitHub Pages / remote host)</summary>
+                <div class="details-body">
+                    <p id="activeApiSummary" class="hint-text">Using same-origin /api/slide-deck</p>
+                    <label for="apiBaseInput" class="field-label">Proxy API Base URL (leave blank for same-origin)</label>
+                    <input
+                        type="url"
+                        id="apiBaseInput"
+                        placeholder="https://menti-api.example.com"
+                        inputmode="url"
+                    >
+                    <div class="button-row">
+                        <button type="button" id="saveApiBaseBtn">Save API Host</button>
+                        <button type="button" id="resetApiBaseBtn" class="secondary-btn">Reset Same-Origin</button>
+                    </div>
+                    <p id="apiBaseFeedback" class="field-feedback" role="status"></p>
+                </div>
+            </details>
+
+            <details id="rawJsonPanel" class="details-panel">
+                <summary>Paste JSON Payload (offline / no-backend fallback)</summary>
+                <div class="details-body">
+                    <label for="rawJsonInput" class="field-label">Mentimeter slide-deck JSON response</label>
+                    <textarea
+                        id="rawJsonInput"
+                        rows="6"
+                        placeholder='{"slide_deck":{"name":"Quiz","slides":[]}}'
+                    ></textarea>
+                    <button type="button" id="parseRawJsonBtn">Parse Pasted JSON</button>
+                </div>
+            </details>
+        </section>
+
+        <section id="solution" class="empty" aria-live="polite" aria-label="Quiz results">
+            <p class="state-message">Enter a Mentimeter link above to inspect available answers.</p>
+        </section>
+
+        <aside id="notice" aria-label="Compatibility notice">
+            <p>
+                Short-answer slides (<code>quiz-open</code>) expose accepted answers directly in the public Mentimeter payload.
+                Multiple-choice slides (<code>quiz-choice</code>) list available options and mark answers only when provided by the payload.
+            </p>
+            <p class="notice-links">
+                <a href="./script.user.js">Install Userscript (runs directly on menti.com)</a>
+                <span aria-hidden="true"> | </span>
+                <a href="https://github.com/An0n-00/mentimeter-quiz-solutions" target="_blank" rel="noopener noreferrer">GitHub repository</a>
+            </p>
+            <button type="button" id="hideNoticeBtn" class="secondary-btn">Dismiss notice</button>
+        </aside>
     </main>
     <footer>
         <p>Rights reserved An0n-00</p>

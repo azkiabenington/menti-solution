@@ -1,210 +1,415 @@
-document.addEventListener('DOMContentLoaded', () => {
-    initializeEventListeners();
-    showAlert('Please enter a Menti link.', 'error');
-});
+import { extractMentiSessionId, parseSlideDeckPayload } from './parser.js';
+import {
+  API_BASE_STORAGE_KEY,
+  DEFAULT_API_BASE,
+  normalizeApiBase,
+  resolveApiBase,
+} from './config.js';
 
-function initializeEventListeners() {
-    document.getElementById('getAnswersForm').addEventListener('submit', (e) => e.preventDefault());
-    document.getElementById('notice').addEventListener('click', hideNotice);
-    document.getElementById('getAnswers').addEventListener('click', handleGetAnswersClick);
-    document.getElementById('getAnswersAdvanced').addEventListener('click', handleGetAnswersAdvancedClick);
+/**
+ * Build the backend API URL for fetching a Mentimeter slide deck.
+ * @param {string} sessionId
+ * @param {string} [apiBase]
+ * @returns {string}
+ */
+export function buildSlideDeckUrl(sessionId, apiBase = '') {
+  const cleanBase = normalizeApiBase(apiBase);
+  const path = `/api/slide-deck?sessionId=${encodeURIComponent(sessionId)}`;
+  return cleanBase ? `${cleanBase}${path}` : path;
 }
 
-function handleGetAnswersAdvancedClick() {
-    window.history.pushState({}, '', `?seriesId=${document.getElementById('seriesValue').value}`);
-    let seriesId = document.getElementById('seriesValue').value;
-    if (!isValidSeriesId(seriesId)) {
-        showAlert('Please enter a valid Menti Series ID.', 'error');
-        window.history.pushState({}, '', window.location.pathname);
-        return;
+/**
+ * Map failed HTTP responses to clear user-facing error codes and hints.
+ * @param {number} status
+ * @param {string} [contentType]
+ * @param {string} [apiBase]
+ * @param {{ message?: string }} [payload]
+ * @returns {{ code: string, message: string }}
+ */
+export function classifyFetchFailure(status, contentType = '', apiBase = '', payload = null) {
+  const isJson = String(contentType).toLowerCase().includes('application/json');
+
+  if (status === 404 && !apiBase && !isJson) {
+    return {
+      code: 'STATIC_CORS_HINT',
+      message:
+        'Static hosting cannot call Mentimeter directly due to browser CORS. Configure Backend API Host below, use Paste JSON, or install the userscript.',
+    };
+  }
+
+  if (status === 404) {
+    return {
+      code: 'NOT_FOUND',
+      message: payload?.message || 'Mentimeter quiz was not found or is no longer active.',
+    };
+  }
+
+  if (status === 400) {
+    return {
+      code: 'INVALID_INPUT',
+      message: payload?.message || 'Invalid Mentimeter link or session code.',
+    };
+  }
+
+  if (status === 504) {
+    return {
+      code: 'UPSTREAM_TIMEOUT',
+      message: payload?.message || 'Mentimeter API timed out. Please try again.',
+    };
+  }
+
+  return {
+    code: 'UPSTREAM_ERROR',
+    message: payload?.message || `Failed to fetch quiz data (HTTP ${status}).`,
+  };
+}
+
+function createCodedError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+/**
+ * Fetch and normalize a Mentimeter slide deck through the configured backend.
+ * @param {string} sessionId
+ * @param {{ apiBase?: string, fetchFn?: typeof fetch }} [options]
+ */
+export async function fetchSlideDeck(
+  sessionId,
+  { apiBase = '', fetchFn = globalThis.fetch } = {},
+) {
+  const url = buildSlideDeckUrl(sessionId, apiBase);
+  let response;
+
+  try {
+    response = await fetchFn(url, {
+      headers: { accept: 'application/json' },
+    });
+  } catch {
+    if (!apiBase) {
+      throw createCodedError(
+        'STATIC_CORS_HINT',
+        'No backend proxy responded at /api/slide-deck. Start server.mjs, configure Backend API Host, or use Paste JSON.',
+      );
     }
-    fetchAndDisplayAnswersAdvanced(seriesId);
-}
+    throw createCodedError(
+      'UPSTREAM_ERROR',
+      'Could not reach the configured Backend API Host. Check the URL and CORS configuration, or use Paste JSON.',
+    );
+  }
 
-function isValidSeriesId(seriesId) {
-    if (seriesId.contains('menti.com') || seriesId.contains('/')) {
-        return false;
-    } else {
-        return true;
-    }
-}
+  const contentType = response.headers?.get?.('content-type') || '';
+  const rawText = await response.text();
+  let parsedJson = null;
 
-function fetchAndDisplayAnswersAdvanced(seriesId) {
-    showAlert(`Fetching answers for MentiSeries: ${seriesId}...`, 'loading');
-    getData(`https://api.allorigins.win/raw?url=https://api.mentimeter.com/series/${seriesId}`)
-        .then(data => {
-            clearSolution();
-            if (data.series_id !== seriesId) {
-                window.history.pushState({}, '', window.location.pathname);
-                showAlert(`No questions found. Please check if this is a correct Menti link. (${data.message})`, 'error');
-            } else {
-                displayQuestions(data.questions);
-            }
-        })
-        .catch(() => {
-            window.history.pushState({}, '', window.location.pathname);
-            showAlert('Failed to fetch data. Something went wrong.', 'error');
-        });
-}
-
-
-function hideNotice() {
-    document.getElementById('notice').style.display = 'none';
-    localStorage.setItem('hideNotice', 'true');
-}
-
-async function handleGetAnswersClick() {
-    const mentiLink = document.getElementById('mentiLink').value;
-    window.history.pushState({}, '', `?mentiLink=${mentiLink}`);
-    if (!isValidMentiLink(mentiLink)) {
-        showAlert('Please enter a Menti link.', 'error');
-        window.history.pushState({}, '', window.location.pathname);
-        return;
-    }
-
-    const mentiSessionId = extractMentiSessionId(mentiLink);
-    if (mentiSessionId) {
-        await fetchAndDisplayAnswers(mentiSessionId);
-    } else {
-        window.history.pushState({}, '', window.location.pathname);
-        showAlert('Please enter a valid menti.com link.', 'error');
-    }
-}
-
-function isValidMentiLink(link) {
-    return link !== '' && link.includes('menti.com');
-}
-
-function extractMentiSessionId(link) {
-    return link.split('/').pop().split('?')[0];
-}
-
-async function fetchAndDisplayAnswers(sessionId) {
-    showAlert(`Fetching answers for MentiSession: ${sessionId}...`, 'loading');
+  if (rawText) {
     try {
-        const data = await getData(`https://api.allorigins.win/raw?url=https://api.mentimeter.com/audience/slide-deck/${sessionId}`);
-        clearSolution();
-        if (data.series === undefined) {
-            window.history.pushState({}, '', window.location.pathname);
-            showAlert(`No questions found. Please check if this is a correct Menti link. (${data.message})`, 'error');
+      parsedJson = JSON.parse(rawText);
+    } catch {
+      parsedJson = null;
+    }
+  }
+
+  if (!response.ok) {
+    const classified = classifyFetchFailure(response.status, contentType, apiBase, parsedJson);
+    throw createCodedError(classified.code, classified.message);
+  }
+
+  if (!parsedJson || typeof parsedJson !== 'object') {
+    throw createCodedError(
+      'INVALID_RESPONSE',
+      'Backend returned a non-JSON response instead of quiz data.',
+    );
+  }
+
+  return parseSlideDeckPayload(parsedJson);
+}
+
+function legacyCopy(text) {
+  const previousFocus = document.activeElement;
+  const field = document.createElement('textarea');
+  field.value = text;
+  field.setAttribute('readonly', '');
+  field.style.cssText = 'position:fixed;inset-block-start:0;opacity:0';
+  document.body.append(field);
+  field.select();
+  try {
+    return document.execCommand('copy');
+  } finally {
+    field.remove();
+    previousFocus?.focus?.({ preventScroll: true });
+  }
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      return legacyCopy(text);
+    }
+  }
+  return legacyCopy(text);
+}
+
+function initializeApp() {
+  const form = document.getElementById('getAnswersForm');
+  const mentiLinkInput = document.getElementById('mentiLink');
+  const submitBtn = document.getElementById('getAnswers');
+  const solutionEl = document.getElementById('solution');
+  const toastEl = document.getElementById('statusToast');
+  const noticeEl = document.getElementById('notice');
+  const hideNoticeBtn = document.getElementById('hideNoticeBtn');
+  const apiBaseInput = document.getElementById('apiBaseInput');
+  const activeApiSummary = document.getElementById('activeApiSummary');
+  const apiBaseFeedback = document.getElementById('apiBaseFeedback');
+  const saveApiBaseBtn = document.getElementById('saveApiBaseBtn');
+  const resetApiBaseBtn = document.getElementById('resetApiBaseBtn');
+  const rawJsonInput = document.getElementById('rawJsonInput');
+  const parseRawJsonBtn = document.getElementById('parseRawJsonBtn');
+
+  let activeApiBase = resolveApiBase({
+    search: window.location.search,
+    storage: window.localStorage,
+    defaultBase: DEFAULT_API_BASE,
+  });
+
+  let toastTimer = null;
+  let lastToastMessage = '';
+
+  function showToast(rawMessage) {
+    clearTimeout(toastTimer);
+    let message = rawMessage;
+    if (message === lastToastMessage) {
+      message += '\u00A0';
+    }
+    lastToastMessage = rawMessage;
+    toastEl.textContent = message;
+    toastEl.classList.add('show');
+    toastTimer = setTimeout(() => {
+      toastEl.classList.remove('show');
+      toastEl.textContent = '';
+    }, 2500);
+  }
+
+  function setStatusState(state, message) {
+    solutionEl.className = state;
+    if (state === 'loading') {
+      solutionEl.setAttribute('aria-busy', 'true');
+    } else {
+      solutionEl.removeAttribute('aria-busy');
+    }
+    solutionEl.replaceChildren();
+    const p = document.createElement('p');
+    p.className = 'state-message';
+    p.textContent = message;
+    solutionEl.append(p);
+  }
+
+  function updateApiBaseDisplay() {
+    apiBaseInput.value = activeApiBase;
+    activeApiSummary.textContent = activeApiBase
+      ? `Active API endpoint: ${activeApiBase}/api/slide-deck`
+      : 'Active API endpoint: same-origin /api/slide-deck';
+  }
+
+  function renderParsedDeck(parsed) {
+    solutionEl.className = 'success';
+    solutionEl.removeAttribute('aria-busy');
+    solutionEl.replaceChildren();
+
+    const summary = document.createElement('div');
+    summary.className = 'deck-summary';
+    const titleEl = document.createElement('h2');
+    titleEl.textContent = parsed.deckTitle || 'Mentimeter Quiz';
+    const countsEl = document.createElement('p');
+    const openCount = parsed.questions.filter((q) => q.type === 'quiz-open').length;
+    const choiceCount = parsed.questions.filter((q) => q.type === 'quiz-choice').length;
+    countsEl.textContent =
+      `Slides: ${parsed.totalSlides} total | Questions: ${parsed.questions.length} ` +
+      `(${openCount} short-answer, ${choiceCount} multiple-choice)`;
+    summary.append(titleEl, countsEl);
+    solutionEl.append(summary);
+
+    if (parsed.questions.length === 0) {
+      const emptyMsg = document.createElement('p');
+      emptyMsg.className = 'state-message';
+      emptyMsg.textContent = 'No quiz questions were found in this slide deck.';
+      solutionEl.append(emptyMsg);
+      return;
+    }
+
+    parsed.questions.forEach((item, index) => {
+      const card = document.createElement('article');
+      card.className = 'question-card';
+
+      const heading = document.createElement('h3');
+      heading.textContent = `${index + 1}. ${item.question || 'Untitled question'}`;
+      card.append(heading);
+
+      if (item.type === 'quiz-open') {
+        if (item.answers.length === 0) {
+          const note = document.createElement('p');
+          note.className = 'question-note';
+          note.textContent = 'No accepted short answer was returned for this slide.';
+          card.append(note);
         } else {
-            displayQuestions(data.series.questions);
+          item.answers.forEach((answerText) => {
+            const row = document.createElement('div');
+            row.className = 'answer-row';
+
+            const label = document.createElement('span');
+            label.className = 'answer-text';
+            label.textContent = `Answer: ${answerText}`;
+
+            const copyBtn = document.createElement('button');
+            copyBtn.type = 'button';
+            copyBtn.className = 'copy-button';
+            copyBtn.textContent = 'Copy';
+            copyBtn.setAttribute('aria-label', `Copy answer ${answerText}`);
+            copyBtn.addEventListener('click', async () => {
+              const copied = await copyTextToClipboard(answerText);
+              showToast(copied ? 'Copied' : 'Copy failed');
+            });
+
+            row.append(label, copyBtn);
+            card.append(row);
+          });
         }
+      } else if (item.type === 'quiz-choice') {
+        const list = document.createElement('ul');
+        list.className = 'choice-list';
+
+        item.options.forEach((option) => {
+          const li = document.createElement('li');
+          if (option.isCorrect) {
+            li.className = 'choice-item-correct';
+            li.textContent = `${option.title} [Correct]`;
+          } else {
+            li.textContent = option.title;
+          }
+          list.append(li);
+        });
+        card.append(list);
+
+        if (item.hasCorrectAnswer) {
+          const correctText = item.options
+            .filter((o) => o.isCorrect)
+            .map((o) => o.title)
+            .join(', ');
+          const copyBtn = document.createElement('button');
+          copyBtn.type = 'button';
+          copyBtn.className = 'copy-button';
+          copyBtn.textContent = 'Copy Correct';
+          copyBtn.addEventListener('click', async () => {
+            const copied = await copyTextToClipboard(correctText);
+            showToast(copied ? 'Copied' : 'Copy failed');
+          });
+          card.append(copyBtn);
+        } else {
+          const note = document.createElement('p');
+          note.className = 'question-note';
+          note.textContent =
+            'Correct answer is not exposed in Mentimeter public API for multiple-choice slides.';
+          card.append(note);
+        }
+      }
+
+      solutionEl.append(card);
+    });
+  }
+
+  async function handleLookup(rawLink) {
+    const sessionId = extractMentiSessionId(rawLink);
+    if (!sessionId) {
+      setStatusState('error', 'Please enter a valid menti.com link or session code.');
+      return;
+    }
+
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.set('mentiLink', rawLink.trim());
+    window.history.replaceState({}, '', nextUrl);
+
+    submitBtn.disabled = true;
+    solutionEl.setAttribute('aria-busy', 'true');
+    setStatusState('loading', `Fetching slide deck for session ${sessionId}...`);
+
+    try {
+      const parsed = await fetchSlideDeck(sessionId, { apiBase: activeApiBase });
+      renderParsedDeck(parsed);
     } catch (error) {
-        window.history.pushState({}, '', window.location.pathname);
-        showAlert('Failed to fetch data. Something went wrong.', 'error');
+      setStatusState('error', error?.message || 'Failed to fetch quiz data.');
+    } finally {
+      submitBtn.disabled = false;
+      solutionEl.removeAttribute('aria-busy');
     }
-}
+  }
 
-async function getData(link) {
-    const response = await fetch(link, {
-        headers: {
-            'accept': '*/*',
-            'accept-encoding': 'gzip, deflate, br, zstd',
-            'accept-language': 'en-GB,en;q=0.8',
-            'dnt': '1',
-            'origin': 'https://www.menti.com',
-            'referer': 'https://www.menti.com/',
-            'sec-ch-ua': '"(Not(A:Brand";v="99", "Opera";v="116", "Chromium";v="131"',
-            'sec-ch-ua-full-version-list': '"(Not(A:Brand";v="99.0.0.0", "Opera";v="116", "Chromium";v="131"',
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"Windows"',
-            'sec-gpc': '1',
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6779.75 Safari/537.36 OPR/116.0.5207.26'
-        }
-    });
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    handleLookup(mentiLinkInput.value);
+  });
 
-    if (response.status === 200) {
-        return response.json();
-    } else {
-        throw new Error('Failed to fetch data');
+  saveApiBaseBtn.addEventListener('click', () => {
+    try {
+      const normalized = normalizeApiBase(apiBaseInput.value);
+      activeApiBase = normalized;
+      if (normalized) {
+        window.localStorage.setItem(API_BASE_STORAGE_KEY, normalized);
+      } else {
+        window.localStorage.removeItem(API_BASE_STORAGE_KEY);
+      }
+      updateApiBaseDisplay();
+      apiBaseFeedback.textContent = normalized
+        ? `Saved API Host: ${normalized}`
+        : 'Cleared custom API Host (same-origin mode).';
+    } catch {
+      apiBaseFeedback.textContent = 'Enter a valid http:// or https:// URL.';
     }
-}
+  });
 
-function displayQuestions(questions) {
-    questions.forEach(question => {
-        if (question.type === 'quiz_open') {
-            displayOpenQuizQuestion(question);
-        } else if (question.type === 'quiz') {
-            displayQuizQuestion(question);
-        }
-    });
-}
+  resetApiBaseBtn.addEventListener('click', () => {
+    activeApiBase = '';
+    window.localStorage.removeItem(API_BASE_STORAGE_KEY);
+    updateApiBaseDisplay();
+    apiBaseFeedback.textContent = 'Reset to same-origin /api/slide-deck.';
+  });
 
-function displayOpenQuizQuestion(question) {
-    const questionText = question.question;
-    const correctAnswers = question.choices;
-    const newQuestion = createQuestionElement(questionText);
-
-    correctAnswers.forEach(answer => {
-        newQuestion.innerHTML += `<p><b data="${answer.label}">Answer: ${answer.label}</b></p>`;
-    });
-    newQuestion.addEventListener('click', () => {
-        navigator.clipboard.writeText(newQuestion.querySelector('b').getAttribute('data'));
-        dropdown('Copied Solution!');
-    });
-    document.getElementById('solution').appendChild(newQuestion);
-}
-
-function displayQuizQuestion(question) {
-    const questionText = question.question;
-    const correctAnswers = question.choices.filter(choice => choice.correct_answer === true);
-    const newQuestion = createQuestionElement(questionText);
-
-    if (correctAnswers.length === 0) {
-        newQuestion.innerHTML += `<p><b>This Question Type is not supported with pure menti link.</b></p>`;
-    } else {
-        correctAnswers.forEach(answer => {
-            newQuestion.innerHTML += `<p><b data="${answer.label}">Answer: ${answer.label}</b></p>`;
-        });
-        newQuestion.addEventListener('click', () => {
-            navigator.clipboard.writeText(newQuestion.querySelector('b').getAttribute('data'));
-            dropdown('Copied Solution!');
-        });
+  parseRawJsonBtn.addEventListener('click', () => {
+    const raw = rawJsonInput.value.trim();
+    if (!raw) {
+      setStatusState('error', 'Paste Mentimeter JSON first before parsing.');
+      return;
     }
-
-    document.getElementById('solution').appendChild(newQuestion);
-}
-
-function createQuestionElement(questionText) {
-    const newQuestion = document.createElement('div');
-    newQuestion.innerHTML = `<h3>Question: ${questionText}</h3>`;
-    return newQuestion;
-}
-
-function showAlert(message, type) {
-    const solutionDiv = document.getElementById('solution');
-    solutionDiv.innerText = message;
-    solutionDiv.className = type;
-}
-
-function clearSolution() {
-    const solutionDiv = document.getElementById('solution');
-    solutionDiv.innerText = '';
-    solutionDiv.className = '';
-}
-
-function dropdown(message) {
-    const dropdown = document.getElementById('dropdown');
-    dropdown.innerText = message;
-    dropdown.classList.add('show');
-    setTimeout(() => dropdown.classList.remove('show'), 3000);
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-    if (localStorage.getItem('hideNotice')) {
-        document.getElementById('notice').style.display = 'none';
+    try {
+      const json = JSON.parse(raw);
+      const parsed = parseSlideDeckPayload(json);
+      renderParsedDeck(parsed);
+    } catch {
+      setStatusState('error', 'Invalid Mentimeter JSON payload.');
     }
+  });
 
-    if (new URLSearchParams(window.location.search).has('mentiLink')) {
-        const mentiLink = new URLSearchParams(window.location.search).get('mentiLink');
-        document.getElementById('mentiLink').value = mentiLink;
-        handleGetAnswersClick();
-    }
+  if (window.localStorage.getItem('hideNotice') === 'true') {
+    noticeEl.hidden = true;
+  }
 
-    if (new URLSearchParams(window.location.search).has('seriesId')) {
-        const seriesId = new URLSearchParams(window.location.search).get('seriesId');
-        document.getElementById('seriesValue').value = seriesId;
-        fetchAndDisplayAnswersAdvanced(seriesId);
-    }
-});
+  hideNoticeBtn.addEventListener('click', () => {
+    noticeEl.hidden = true;
+    window.localStorage.setItem('hideNotice', 'true');
+  });
+
+  updateApiBaseDisplay();
+
+  const initialLink = new URLSearchParams(window.location.search).get('mentiLink');
+  if (initialLink) {
+    mentiLinkInput.value = initialLink;
+    handleLookup(initialLink);
+  }
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('DOMContentLoaded', initializeApp);
+}
