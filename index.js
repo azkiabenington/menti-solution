@@ -1,4 +1,9 @@
-import { extractMentiSessionId, parseSlideDeckPayload } from './parser.js';
+import {
+  extractMentiSessionId,
+  formatDeckPrompt,
+  formatQuestionPrompt,
+  parseSlideDeckPayload,
+} from './parser.js';
 import {
   API_BASE_STORAGE_KEY,
   normalizeApiBase,
@@ -294,6 +299,7 @@ function initializeApp() {
 
     const summary = document.createElement('div');
     summary.className = 'deck-summary';
+    const summaryText = document.createElement('div');
     const titleEl = document.createElement('h2');
     titleEl.textContent = parsed.deckTitle || 'Mentimeter Quiz';
     const countsEl = document.createElement('p');
@@ -302,7 +308,22 @@ function initializeApp() {
     countsEl.textContent =
       `Slides: ${parsed.totalSlides} total | Questions: ${parsed.questions.length} ` +
       `(${openCount} short-answer, ${choiceCount} multiple-choice)`;
-    summary.append(titleEl, countsEl);
+    summaryText.append(titleEl, countsEl);
+    summary.append(summaryText);
+
+    if (parsed.questions.length > 0) {
+      const copyAllBtn = document.createElement('button');
+      copyAllBtn.type = 'button';
+      copyAllBtn.id = 'copyAllBtn';
+      copyAllBtn.className = 'copy-button secondary-btn';
+      copyAllBtn.textContent = 'Copy All Questions';
+      copyAllBtn.addEventListener('click', async () => {
+        const copied = await copyTextToClipboard(formatDeckPrompt(parsed));
+        showToast(copied ? 'Copied all questions' : 'Copy failed');
+      });
+      summary.append(copyAllBtn);
+    }
+
     solutionEl.append(summary);
 
     if (parsed.questions.length === 0) {
@@ -368,6 +389,9 @@ function initializeApp() {
           card.append(list);
         }
 
+        const actionsRow = document.createElement('div');
+        actionsRow.className = 'card-actions';
+
         if (item.hasCorrectAnswer) {
           const correctText = item.options
             .filter((o) => o.isCorrect)
@@ -382,7 +406,7 @@ function initializeApp() {
             const copied = await copyTextToClipboard(correctText);
             showToast(copied ? 'Copied' : 'Copy failed');
           });
-          card.append(copyBtn);
+          actionsRow.append(copyBtn);
         } else {
           const note = document.createElement('p');
           note.className = 'question-note';
@@ -390,6 +414,18 @@ function initializeApp() {
             'Correct answer is not exposed in Mentimeter public API for multiple-choice slides.';
           card.append(note);
         }
+
+        const copyQuestionBtn = document.createElement('button');
+        copyQuestionBtn.type = 'button';
+        copyQuestionBtn.className = 'copy-button secondary-btn';
+        copyQuestionBtn.textContent = 'Copy Question + Options';
+        copyQuestionBtn.setAttribute('aria-label', `Copy question ${index + 1} and options`);
+        copyQuestionBtn.addEventListener('click', async () => {
+          const copied = await copyTextToClipboard(formatQuestionPrompt(item, index));
+          showToast(copied ? 'Copied question' : 'Copy failed');
+        });
+        actionsRow.append(copyQuestionBtn);
+        card.append(actionsRow);
       }
 
       solutionEl.append(card);

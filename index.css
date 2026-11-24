@@ -302,6 +302,11 @@ summary:focus-visible {
     margin-bottom: 16px;
     padding-bottom: 12px;
     border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
 }
 
 .deck-summary h2 {
@@ -314,6 +319,13 @@ summary:focus-visible {
     margin: 0;
     font-size: 0.92rem;
     color: var(--text-muted);
+}
+
+.card-actions {
+    margin-top: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
 }
 
 .question-card {

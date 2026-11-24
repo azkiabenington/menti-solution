@@ -232,6 +232,44 @@
     toggleBtn = null;
   }
 
+  function formatQuestionPrompt(item, index = 0) {
+    const lines = [`${index + 1}. ${nonEmptyText(item?.question) || 'Untitled question'}`];
+    if (item?.type === 'quiz-open') {
+      const answers = Array.isArray(item.answers) ? item.answers.filter(Boolean) : [];
+      if (answers.length > 0) lines.push(`Accepted answer(s): ${answers.join(', ')}`);
+    } else if (item?.type === 'quiz-choice') {
+      const options = Array.isArray(item.options) ? item.options : [];
+      options.forEach((opt, optIndex) => {
+        const label = optIndex < 26 ? String.fromCharCode(65 + optIndex) : String(optIndex + 1);
+        lines.push(opt.isCorrect ? `${label}. ${opt.title} [Correct]` : `${label}. ${opt.title}`);
+      });
+    }
+    return lines.join('\n');
+  }
+
+  function formatDeckPrompt(parsed) {
+    const questions = Array.isArray(parsed?.questions) ? parsed.questions : [];
+    const body = questions.map((item, index) => formatQuestionPrompt(item, index)).join('\n\n');
+    const title = nonEmptyText(parsed?.deckTitle);
+    if (!title) return body;
+    return body ? `Quiz: ${title}\n\n${body}` : `Quiz: ${title}`;
+  }
+
+  function makeCopyButton(label, getText, isSecondary = false) {
+    const btn = makeButton(label, async () => {
+      try {
+        await navigator.clipboard.writeText(getText());
+        btn.textContent = 'Copied';
+        setTimeout(() => {
+          btn.textContent = label;
+        }, 1500);
+      } catch {
+        btn.textContent = 'Failed';
+      }
+    }, isSecondary);
+    return btn;
+  }
+
   function renderResults(parsed) {
     ensurePanel();
     statusEl.textContent = `${parsed.deckTitle || 'Mentimeter Quiz'} (${parsed.questions.length} question(s))`;
@@ -244,6 +282,10 @@
       bodyEl.appendChild(empty);
       return;
     }
+
+    const copyAllBtn = makeCopyButton('Copy All Questions', () => formatDeckPrompt(parsed), true);
+    copyAllBtn.style.alignSelf = 'flex-start';
+    bodyEl.appendChild(copyAllBtn);
 
     parsed.questions.forEach((item, index) => {
       const card = document.createElement('div');
@@ -281,17 +323,7 @@
             ansSpan.style.color = '#6ee7b7';
             ansSpan.style.fontWeight = '700';
 
-            const copyBtn = makeButton('Copy', async () => {
-              try {
-                await navigator.clipboard.writeText(ans);
-                copyBtn.textContent = 'Copied';
-                setTimeout(() => {
-                  copyBtn.textContent = 'Copy';
-                }, 1500);
-              } catch {
-                copyBtn.textContent = 'Failed';
-              }
-            });
+            const copyBtn = makeCopyButton('Copy', () => ans);
             copyBtn.setAttribute('aria-label', `Copy answer ${ans}`);
 
             row.append(ansSpan, copyBtn);
@@ -319,6 +351,15 @@
           note.style.color = '#b8c2d1';
           card.appendChild(note);
         }
+
+        const copyQuestionBtn = makeCopyButton(
+          'Copy Question + Options',
+          () => formatQuestionPrompt(item, index),
+          true,
+        );
+        copyQuestionBtn.style.marginTop = '8px';
+        copyQuestionBtn.setAttribute('aria-label', `Copy question ${index + 1} and options`);
+        card.appendChild(copyQuestionBtn);
       }
 
       bodyEl.appendChild(card);

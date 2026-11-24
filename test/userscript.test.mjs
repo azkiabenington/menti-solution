@@ -336,4 +336,65 @@ describe('script.user.js', () => {
       assert.equal(btn.style.minWidth, '44px');
     }
   });
+
+  it('renders Copy All and per-question Copy Q+Options controls with clipboard text formatting', async () => {
+    const source = await fs.readFile(SCRIPT_PATH, 'utf8');
+    const dom = createMockDom('https://www.menti.com/al742i1zxz7c');
+    const copiedTexts = [];
+
+    vm.runInNewContext(source, {
+      window: dom.windowObj,
+      document: dom.document,
+      history: dom.history,
+      location: dom.location,
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            slide_deck: {
+              name: 'Quiz Copy',
+              slides: [
+                {
+                  slide_public_key: 'q1',
+                  static_content: { type: 'quiz-choice' },
+                  interactive_contents: [
+                    {
+                      title: 'Alat hitung?',
+                      choices: [{ title: 'Sempoa' }, { title: 'Astrolab' }],
+                    },
+                  ],
+                },
+              ],
+            },
+          };
+        },
+      }),
+      navigator: {
+        clipboard: {
+          writeText: async (text) => {
+            copiedTexts.push(text);
+          },
+        },
+      },
+      URL,
+      setTimeout,
+      clearTimeout,
+      console,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const buttons = dom.body.querySelectorAll('button');
+    const copyAllBtn = buttons.find((b) => /Copy All/i.test(b.textContent));
+    const copyQuestionBtn = buttons.find((b) => /Copy Question/i.test(b.textContent));
+    assert.ok(copyAllBtn, 'Expected Copy All button in userscript panel');
+    assert.ok(copyQuestionBtn, 'Expected Copy Question button on quiz-choice card');
+
+    for (const fn of copyQuestionBtn.listeners.get('click') || []) await fn();
+    for (const fn of copyAllBtn.listeners.get('click') || []) await fn();
+
+    assert.equal(copiedTexts.length, 2);
+    assert.match(copiedTexts[0], /1\. Alat hitung\?\nA\. Sempoa\nB\. Astrolab/);
+    assert.match(copiedTexts[1], /^Quiz: Quiz Copy\n\n1\. Alat hitung\?/);
+  });
 });

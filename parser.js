@@ -131,3 +131,36 @@ export function parseSlideDeckPayload(payload) {
 
   throw new Error('INVALID_PAYLOAD');
 }
+
+function formatOptionLabel(index) {
+  return index < 26 ? String.fromCharCode(65 + index) : String(index + 1);
+}
+
+// Formats one parsed question and its choices/answers for quick clipboard paste.
+export function formatQuestionPrompt(item, index = 0) {
+  const lines = [`${index + 1}. ${nonEmptyText(item?.question) || 'Untitled question'}`];
+
+  if (item?.type === 'quiz-open') {
+    const answers = Array.isArray(item.answers) ? item.answers.filter(Boolean) : [];
+    if (answers.length > 0) {
+      lines.push(`Accepted answer(s): ${answers.join(', ')}`);
+    }
+  } else if (item?.type === 'quiz-choice') {
+    const options = Array.isArray(item.options) ? item.options : [];
+    options.forEach((opt, optIndex) => {
+      const prefix = `${formatOptionLabel(optIndex)}.`;
+      lines.push(opt.isCorrect ? `${prefix} ${opt.title} [Correct]` : `${prefix} ${opt.title}`);
+    });
+  }
+
+  return lines.join('\n');
+}
+
+export function formatDeckPrompt(parsed) {
+  const questions = Array.isArray(parsed?.questions) ? parsed.questions : [];
+  const formattedQuestions = questions.map((item, index) => formatQuestionPrompt(item, index));
+  const title = nonEmptyText(parsed?.deckTitle);
+  const body = formattedQuestions.join('\n\n');
+  if (!title) return body;
+  return body ? `Quiz: ${title}\n\n${body}` : `Quiz: ${title}`;
+}

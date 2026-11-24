@@ -4,6 +4,8 @@ import {
   isValidSessionId,
   extractMentiSessionId,
   parseSlideDeckPayload,
+  formatQuestionPrompt,
+  formatDeckPrompt,
 } from '../parser.js';
 
 describe('isValidSessionId', () => {
@@ -206,5 +208,56 @@ describe('parseSlideDeckPayload', () => {
   it('throws INVALID_PAYLOAD when payload is missing slide_deck and series', () => {
     assert.throws(() => parseSlideDeckPayload({}), /INVALID_PAYLOAD/);
     assert.throws(() => parseSlideDeckPayload(null), /INVALID_PAYLOAD/);
+  });
+});
+
+describe('prompt copy formatters', () => {
+  it('formats single quiz-choice and quiz-open questions and full decks cleanly', () => {
+    const choiceText = formatQuestionPrompt(
+      {
+        id: 'q1',
+        type: 'quiz-choice',
+        question: 'Alat hitung kuno?',
+        options: [
+          { title: 'Sempoa', isCorrect: false },
+          { title: 'Astrolab', isCorrect: false },
+        ],
+        hasCorrectAnswer: false,
+      },
+      0,
+    );
+    assert.equal(choiceText, '1. Alat hitung kuno?\nA. Sempoa\nB. Astrolab');
+
+    const openText = formatQuestionPrompt(
+      {
+        id: 'q2',
+        type: 'quiz-open',
+        question: 'Nama keluarga Ada?',
+        answers: ['Lovelace'],
+      },
+      1,
+    );
+    assert.equal(openText, '2. Nama keluarga Ada?\nAccepted answer(s): Lovelace');
+
+    const deckText = formatDeckPrompt({
+      deckTitle: 'Kuis Sejarah',
+      totalSlides: 2,
+      questions: [
+        {
+          id: 'q1',
+          type: 'quiz-choice',
+          question: 'Alat hitung kuno?',
+          options: [{ title: 'Sempoa', isCorrect: false }],
+          hasCorrectAnswer: false,
+        },
+        {
+          id: 'q2',
+          type: 'quiz-open',
+          question: 'Nama keluarga Ada?',
+          answers: ['Lovelace'],
+        },
+      ],
+    });
+    assert.match(deckText, /^Quiz: Kuis Sejarah\n\n1\. Alat hitung kuno\?\nA\. Sempoa\n\n2\. Nama keluarga Ada\?/);
   });
 });
